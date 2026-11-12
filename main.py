@@ -134,10 +134,19 @@ class AmoFinancePlugin(Star):
         return default if value is None else str(value)
 
     def _prices(self) -> dict[str, float]:
-        raw = self._cfg("prices", None)
+        """物价表：配置里写成 JSON 字符串，解析失败就用内置价格。"""
+        raw = self._cfg("prices", "")
         merged = dict(DEFAULT_PRICES)
+        data = None
         if isinstance(raw, dict):
-            for key, value in raw.items():
+            data = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = None
+        if isinstance(data, dict):
+            for key, value in data.items():
                 try:
                     merged[str(key)] = float(value)
                 except Exception:

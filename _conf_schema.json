@@ -66,10 +66,10 @@
     "hint": "每月 1 号扣房租/物业/水电/网费/话费。关掉就只记账不自动扣。"
   },
   "prices": {
-    "type": "object",
-    "description": "物价表",
-    "default": {},
-    "hint": "留空用内置价格。可覆盖单项，例如 {\"奶茶\": 22}。"
+    "type": "text",
+    "description": "物价表（JSON）",
+    "default": "",
+    "hint": "留空用内置价格。可覆盖单项，例如 {\"奶茶\": 22, \"外卖\": 40}。"
   },
   "daily_food_budget": {
     "type": "float",
