@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.2.4"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -769,6 +769,7 @@ class AmoFinancePlugin(Star):
             reason=str(data.get("reason") or ""),
             payee=str(data.get("payee") or ""),
             from_savings=bool(data.get("from_savings")),
+            request_id=str(data.get("request_id") or ""),
         )
         self._report_to_companion()
         return self._json({"code": 0, "data": result})
