@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.6.0"
+PLUGIN_VERSION = "1.7.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -361,6 +361,7 @@ class AmoFinancePlugin(Star):
         data["fixed_total"] = round(sum(item["amount"] for item in data["fixed"]), 2)
         data["anxiety"] = anxiety_from(self._ledger, data["fixed_total"])
         data["salary"] = self.salary_info()
+        data["borrow"] = self.borrow_info()
         try:
             invest = self.invest_summary()
         except Exception as exc:
@@ -467,6 +468,81 @@ class AmoFinancePlugin(Star):
             })
             self._save()
         return result
+
+    #: 借钱的两条通道：转账按天封顶，红包单个封顶、累计封顶
+    BORROW_TRANSFER_DAILY = 10000.0
+    BORROW_RED_MAX = 200.0
+    BORROW_RED_TOTAL = 10000.0
+
+    def _borrow_day(self) -> dict[str, Any]:
+        today = date.today().isoformat()
+        row = self._state.get("borrow_day")
+        if not isinstance(row, dict) or row.get("date") != today:
+            row = {"date": today, "transfer": 0.0}
+            self._state["borrow_day"] = row
+        return row
+
+    def borrow_info(self) -> dict[str, Any]:
+        """她还能借多少：转账按天，红包按次与累计。"""
+        day = self._borrow_day()
+        used = float(day.get("transfer") or 0)
+        red_used = float(self._state.get("borrow_red_total") or 0)
+        return {
+            "owed": round(self._ledger.owed_to_user, 2),
+            "transfer_today": round(used, 2),
+            "transfer_left": round(max(0.0, self.BORROW_TRANSFER_DAILY - used), 2),
+            "red_total": round(red_used, 2),
+            "red_left": round(max(0.0, self.BORROW_RED_TOTAL - red_used), 2),
+            "red_max_once": self.BORROW_RED_MAX,
+        }
+
+    def borrow(self, amount: float, kind: str = "transfer", from_user: str = "") -> dict[str, Any]:
+        """她开口借的钱：算欠款，不算收入。
+
+        两条通道各自有上限——不设上限的话，一次「借」就能把账本刷爆，
+        而且她本来就该为钱发愁，不是想借多少有多少。
+        """
+        try:
+            value = round(float(amount or 0), 2)
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "金额不对"}
+        if value <= 0:
+            return {"ok": False, "reason": "金额不对"}
+        channel = "red" if str(kind or "").lower() in ("red", "redpacket", "红包") else "transfer"
+        if channel == "red":
+            if value > self.BORROW_RED_MAX:
+                return {"ok": False, "reason": "单个红包最多 %.0f" % self.BORROW_RED_MAX}
+            used = float(self._state.get("borrow_red_total") or 0)
+            if used + value > self.BORROW_RED_TOTAL:
+                return {"ok": False, "reason": "红包累计到上限了",
+                        "left": round(max(0.0, self.BORROW_RED_TOTAL - used), 2)}
+        else:
+            day = self._borrow_day()
+            used = float(day.get("transfer") or 0)
+            if used + value > self.BORROW_TRANSFER_DAILY:
+                return {"ok": False, "reason": "今天转账到上限了",
+                        "left": round(max(0.0, self.BORROW_TRANSFER_DAILY - used), 2)}
+        result = self._ledger.apply(value, "transfer_in", reason="借款")
+        if not result.get("ok"):
+            return result
+        if channel == "red":
+            self._state["borrow_red_total"] = round(
+                float(self._state.get("borrow_red_total") or 0) + value, 2)
+        else:
+            day = self._borrow_day()
+            day["transfer"] = round(float(day.get("transfer") or 0) + value, 2)
+        self._log({
+            "kind": "borrow", "channel": channel, "amount": value,
+            "from": from_user, "owed": round(self._ledger.owed_to_user, 2),
+            "balance": result.get("balance"),
+        })
+        self._save()
+        logger.info("[amo_fin] 她借了 %.2f（%s），共欠 %.2f"
+                    % (value, "红包" if channel == "red" else "转账", self._ledger.owed_to_user))
+        return {"ok": True, "channel": channel, "amount": value,
+                "balance": round(self._ledger.balance, 2),
+                "owed": round(self._ledger.owed_to_user, 2),
+                "left": self.borrow_info()}
 
     def repay(self, amount: float) -> dict[str, Any]:
         result = self._ledger.repay_user(amount)
@@ -1053,6 +1129,7 @@ class AmoFinancePlugin(Star):
             ("/health", self.api_health, ["GET"]),
             ("/salary", self.api_salary, ["POST"]),
             ("/invest", self.api_invest, ["GET", "POST"]),
+            ("/borrow", self.api_borrow, ["POST"]),
             ("/history", self.api_history, ["GET"]),
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
@@ -1103,6 +1180,7 @@ class AmoFinancePlugin(Star):
             "own_car": snap["own_car"],
             "salary": snap.get("salary") or self.salary_info(),
             "invest": snap.get("invest") or self.invest_summary(),
+            "borrow": snap.get("borrow") or self.borrow_info(),
             "uptime": int(_now() - self._started_at),
         }})
 
@@ -1159,6 +1237,21 @@ class AmoFinancePlugin(Star):
             from_savings=bool(data.get("from_savings")),
             request_id=str(data.get("request_id") or ""),
         )
+        self._report_to_companion()
+        return self._json({"code": 0, "data": result})
+
+    async def api_borrow(self):
+        """她开口要钱：{amount, kind: transfer|red}。算欠款，不算收入。"""
+        data = await self._payload()
+        try:
+            amount = float(data.get("amount") or 0)
+        except (TypeError, ValueError):
+            return self._fail("金额格式不对")
+        result = self.borrow(amount, kind=str(data.get("kind") or "transfer"),
+                             from_user=str(data.get("from_user") or ""))
+        if not result.get("ok"):
+            return self._json({"code": 1, "message": result.get("reason") or "借不了",
+                               "data": result})
         self._report_to_companion()
         return self._json({"code": 0, "data": result})
 

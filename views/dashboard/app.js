@@ -64,6 +64,15 @@ async function loadStatus() {
   $("anxietyHint").textContent = a >= 0.7 ? "她现在有点为钱发愁（" + a.toFixed(2) + "）"
     : a >= 0.3 ? "还算稳（" + a.toFixed(2) + "）" : "没什么压力";
 
+  const bor = d.borrow || {};
+  if ($("borrowHint")) {
+    const owed = Number(bor.owed || 0);
+    $("borrowHint").textContent = owed > 0
+      ? ("她欠你 " + money(owed) + "；今天转账还可借 " + money(bor.transfer_left || 0) +
+         "，红包剩 " + money(bor.red_left || 0))
+      : ("借钱给她：转账每天最多一万 / 红包单个最多 200（累计一万）。聊天里发「[转账]500」或「[红包]200」即可。");
+  }
+
   const inv = d.invest || {};
   const pnl = Number(inv.total_pnl || 0);
   const dayPnl = Number(inv.day_pnl || 0);
