@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.8.0"
+PLUGIN_VERSION = "1.8.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -108,6 +108,29 @@ class AmoFinancePlugin(Star):
         super().__init__(context)
         self.context = context
         self.config = config or {}
+
+        # 配置自愈：升级/重装/改目录名之后，把空掉的 key 从快照补回来。
+        # 快照在 plugin_data/<插件名>/config_snapshot.json（0600），升级不覆盖、
+        # schema 重写也删不到它。
+        try:
+            from .config_guard import heal as _cfg_heal, fallback_data_dir as _cfg_data_dir
+        except ImportError:
+            try:
+                from config_guard import heal as _cfg_heal, fallback_data_dir as _cfg_data_dir
+            except Exception:
+                _cfg_heal = None
+        if _cfg_heal is not None:
+            try:
+                _guard_dir = os.path.dirname(os.path.abspath(__file__))
+                _healed = _cfg_heal(self.config, plugin_name=PLUGIN_NAME,
+                                    plugin_dir=_guard_dir,
+                                    data_dir=_cfg_data_dir(_guard_dir, PLUGIN_NAME),
+                                    logger=logger)
+                if _healed.get("restored"):
+                    logger.info("[config] 本次启动补回 %d 项配置（%s）"
+                                % (len(_healed["restored"]), ", ".join(_healed["restored"])))
+            except Exception as exc:
+                logger.debug("[config] 配置自愈失败: %s" % exc)
         self._started_at = _now()
         self._ledger = Ledger()
         # 月结 / 固定支出的「上次执行」标记，防止重启重复扣

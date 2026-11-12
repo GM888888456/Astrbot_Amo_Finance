@@ -1,5 +1,9 @@
 # 更新日志
 
+## 1.8.1（配置自愈）
+
+- 新增 `config_guard.py`：配置快照自愈，升级/重装/改目录名之后把空掉的 key 自动补回（只补空不覆盖，快照 0600 存在 `plugin_data/<插件名>/`）。
+
 ## 1.8.0（吃饭：菜价、买菜、进食审批）
 
 - 新增 `groceries.py`（菜价/市价：城市档位 × 季节 × 天气 × 节假日 × 当日波动，同一天同一价）与 `ledger.py` 的现成餐/饮品/食材/菜谱表；`food_quote()` 报菜单、`food_buy()` 买菜入库、`food_propose()` 走审批器（余额不够返回 `no_money`，一分不扣）；接口 `/food/quote`、`/food/propose`、`/food/buy`、`/market`。
