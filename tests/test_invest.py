@@ -146,3 +146,52 @@ class InvestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LeekTests(unittest.TestCase):
+    """韭菜特质：涨了上头提加仓，亏了死扛。"""
+
+    def _plugin(self, pct):
+        p = build(quotes={"sh601318": quote("sh601318", "中国平安", 50.0, 50.0)})
+        p.config = {"invest_watchlist": "601318"}
+        p.mood_signal = lambda: {"day_pnl_pct": pct, "day_pnl": pct * 10}
+        return p
+
+    def test_overconfident_on_big_gain(self):
+        p = self._plugin(4.0)
+        self.assertEqual(p.market_stance()["stance"], "overconfident")
+
+    def test_hodl_on_big_loss(self):
+        p = self._plugin(-4.0)
+        self.assertEqual(p.market_stance()["stance"], "hodl")
+
+    def test_normal_on_small_move(self):
+        p = self._plugin(0.5)
+        self.assertEqual(p.market_stance()["stance"], "")
+
+    def test_stance_sticky_for_the_day(self):
+        p = self._plugin(4.0)
+        first = p.market_stance()
+        p.mood_signal = lambda: {"day_pnl_pct": 0.1, "day_pnl": 0}
+        self.assertEqual(p.market_stance()["stance"], first["stance"], "当天触发过就锁住")
+
+    def test_proposal_created_and_rejected(self):
+        p = self._plugin(4.0)
+        p.invest_propose()
+        prop = p.pending_proposal()
+        self.assertEqual(prop["status"], "pending")
+        self.assertGreater(prop["qty"], 0)
+        result = p.invest_resolve_proposal(False)
+        self.assertEqual(result["status"], "rejected")
+        self.assertFalse(p._positions(), "驳回就不该买")
+
+    def test_proposal_approved_buys(self):
+        p = self._plugin(4.0)
+        p.invest_propose()
+        result = p.invest_resolve_proposal(True)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(p._positions())
+
+    def test_resolve_without_proposal(self):
+        p = self._plugin(4.0)
+        self.assertFalse(p.invest_resolve_proposal(True)["ok"])

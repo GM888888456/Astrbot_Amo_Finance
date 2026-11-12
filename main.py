@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.4.0"
+PLUGIN_VERSION = "1.5.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -574,6 +574,11 @@ class AmoFinancePlugin(Star):
         equity = round(self._ledger.balance + summary["total_value"], 2)
         summary["equity"] = equity
         summary["cash"] = round(self._ledger.balance, 2)
+        try:
+            summary["stance"] = (self.market_stance() or {}).get("stance") or ""
+        except Exception:
+            summary["stance"] = ""
+        summary["proposal"] = self.pending_proposal()
         return summary
 
     def invest_buy(self, symbol: str, qty: int = 0, budget: float = 0.0) -> dict[str, Any]:
@@ -716,6 +721,109 @@ class AmoFinancePlugin(Star):
                 return
         logger.info("[amo_fin] 这次没买成（行情或余额不够），下次再试")
 
+    #: 韭菜档位阈值：涨/跌超过这个百分比就进入相应的情绪档
+    LEEK_UP_PCT = 3.0
+    LEEK_DOWN_PCT = -3.0
+
+    def _today(self) -> str:
+        return date.today().isoformat()
+
+    def market_stance(self) -> dict[str, Any]:
+        """今天她是什么「韭菜状态」：过度自信 / 死扛 / 正常。
+
+        一旦当天触发过就锁住：上午跌 4% 死扛，下午涨回来也还是死扛——
+        情绪不是实时跟随，这才像人。
+        """
+        today = self._today()
+        record = self._state.get("invest_stance")
+        if isinstance(record, dict) and record.get("date") == today:
+            return record
+        signal = self.mood_signal()
+        pct = float(signal.get("day_pnl_pct") or 0)
+        stance = ""
+        if pct >= self.LEEK_UP_PCT:
+            stance = "overconfident"
+        elif pct <= self.LEEK_DOWN_PCT:
+            stance = "hodl"
+        record = {"date": today, "stance": stance, "pct": pct}
+        self._state["invest_stance"] = record
+        self._save()
+        return record
+
+    def pending_proposal(self) -> dict[str, Any] | None:
+        """还没处理（或者 24 小时内刚被拒）的加仓提案。"""
+        row = self._state.get("invest_proposal")
+        if not isinstance(row, dict):
+            return None
+        return dict(row)
+
+    def invest_propose(self) -> dict[str, Any]:
+        """过度自信的时候提一个加仓提案：等他点头才买。
+
+        提案故意激进（想拿买房钱上车），被驳回才是重点——她会撒娇。
+        """
+        row = self._state.get("invest_proposal")
+        if isinstance(row, dict) and row.get("status") == "pending":
+            return {"ok": False, "reason": "已经有一个提案在等他点头了", "proposal": row}
+        positions = self._positions()
+        symbol = ""
+        if positions:
+            symbol = max(positions, key=lambda code: int((positions[code] or {}).get("qty") or 0))
+        elif self._watchlist():
+            symbol = self._watchlist()[0]
+        if not symbol:
+            return {"ok": False, "reason": "没有可买的股票"}
+        data = self._board().quotes([symbol]).get(symbol)
+        if not data:
+            return {"ok": False, "reason": "行情拿不到"}
+        price = float(data["price"])
+        market = market_mod.market_of(symbol)
+        # 嘴上说「全投进去」，真要下单还是得守三成上限——不然点「同意」也买不进来
+        summary = self.invest_summary()
+        equity = max(summary["equity"], 1.0)
+        held = float((self._positions().get(symbol) or {}).get("qty") or 0) * price
+        room = max(0.0, equity * pf.MAX_WEIGHT - held)
+        budget = min(self._ledger.balance * 0.5, room * 0.9)
+        qty = pf.qty_from_budget(budget, price, market)
+        if qty <= 0:
+            return {"ok": False, "reason": "钱不够买一手"}
+        proposal = {
+            "id": "p-%d" % int(_now()),
+            "symbol": symbol,
+            "name": data.get("name") or symbol,
+            "qty": qty,
+            "price": price,
+            "amount": round(price * qty, 2),
+            "why": "今天涨了，我觉得还能涨，想加仓",
+            "status": "pending",
+            "ts": _now(),
+        }
+        self._state["invest_proposal"] = proposal
+        self._save()
+        logger.info("[amo_fin] 她提了个加仓提案：%s %d 股（¥%.0f）"
+                    % (proposal["name"], qty, proposal["amount"]))
+        return {"ok": True, "proposal": proposal}
+
+    def invest_resolve_proposal(self, approve: bool) -> dict[str, Any]:
+        """同意就买，驳回就记下来（她会委屈，但不会真生气）。"""
+        row = self._state.get("invest_proposal")
+        if not isinstance(row, dict) or row.get("status") != "pending":
+            return {"ok": False, "reason": "没有待处理的提案"}
+        if not approve:
+            row["status"] = "rejected"
+            row["resolved_at"] = _now()
+            self._state["invest_proposal"] = row
+            self._save()
+            return {"ok": True, "status": "rejected", "proposal": row}
+        result = self.invest_buy(row.get("symbol") or "", qty=int(row.get("qty") or 0))
+        row["status"] = "approved" if result.get("ok") else "failed"
+        row["resolved_at"] = _now()
+        row["result"] = result.get("reason") or "ok"
+        self._state["invest_proposal"] = row
+        self._save()
+        return {"ok": bool(result.get("ok")), "status": row["status"],
+                "proposal": row, "result": result}
+
     def _invest_tick(self) -> None:
         """收盘后（或插件定时器里）做两件事：刷新行情、按规则决定今天动不动手。"""
         if not self._bool("invest_enable", True):
@@ -734,9 +842,20 @@ class AmoFinancePlugin(Star):
             return
         self._state["invest_auto_date"] = today
         self._save()
-        actions = pf.suggest_actions(
-            self._positions(), self._ledger.balance, self._watchlist(), self._fx(), self._rng,
-        )
+        stance = str((self.market_stance() or {}).get("stance") or "")
+        if stance == "overconfident":
+            # 上头了：今天不自己偷偷买，而是提一个加仓提案等他点头
+            proposal = self.pending_proposal() or {}
+            if proposal.get("status") != "pending" and str(proposal.get("date") or "") != today:
+                self.invest_propose()
+            actions = []
+        else:
+            actions = pf.suggest_actions(
+                self._positions(), self._ledger.balance, self._watchlist(), self._fx(), self._rng,
+            )
+            if stance == "hodl":
+                # 死扛：赚了也不卖、亏了更不卖（这次连止盈都不执行）
+                actions = [a for a in actions if a.get("action") != "sell"]
         for item in actions[:2]:
             if item.get("action") == "sell":
                 result = self.invest_sell(item["symbol"], item.get("qty") or 0)
@@ -955,6 +1074,7 @@ class AmoFinancePlugin(Star):
             ("/salary", self.api_salary, ["POST"]),
             ("/invest", self.api_invest, ["GET", "POST"]),
             ("/invest/trade", self.api_invest_trade, ["POST"]),
+            ("/invest/proposal", self.api_invest_proposal, ["POST"]),
             ("/history", self.api_history, ["GET"]),
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
@@ -1026,6 +1146,18 @@ class AmoFinancePlugin(Star):
         data = await self._payload()
         force = bool(data.get("refresh"))
         return self._json({"code": 0, "data": self.invest_summary(force=force)})
+
+    async def api_invest_proposal(self):
+        """她涨上头了提的加仓提案：同意就买，驳回她会委屈。"""
+        data = await self._payload()
+        action = str(data.get("action") or "").strip().lower()
+        if action == "approve":
+            result = self.invest_resolve_proposal(True)
+        elif action == "reject":
+            result = self.invest_resolve_proposal(False)
+        else:
+            return self._fail("动作只能是 approve 或 reject")
+        return self._json({"code": 0, "data": result})
 
     async def api_invest_trade(self):
         """模拟买卖：{action: buy|sell, symbol, qty?, budget?, all_out?}"""

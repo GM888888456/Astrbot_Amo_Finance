@@ -50,6 +50,15 @@
         <dt>今日</dt><dd id="investDay">—</dd>
         <dt>现金</dt><dd id="investCash">—</dd>
       </dl>
+      <div id="proposalCard" hidden>
+        <div class="label" style="margin-top:10px">她想加仓（等你点头）</div>
+        <div class="meta" id="proposalText">—</div>
+        <div class="row">
+          <button class="btn" id="approveBtn">同意</button>
+          <button class="btn" id="rejectBtn">驳回</button>
+          <span class="hint" id="proposalHint"></span>
+        </div>
+      </div>
       <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
       <div class="grid2">
         <div class="field"><label>代码</label><input id="tradeSymbol" placeholder="600519 / 00700 / AAPL" /></div>
@@ -89,6 +98,6 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.4.0"></script>
+  <script src="./app.js?v=1.5.0"></script>
 </body>
 </html>

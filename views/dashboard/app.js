@@ -78,6 +78,17 @@ async function loadStatus() {
     (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>"
   ).join("") || '<li class="empty">还没有持仓，等她自己去买，或者你手动下一单</li>';
 
+  const prop = inv.proposal || null;
+  const card = $("proposalCard");
+  if (card) {
+    const pending = prop && prop.status === "pending";
+    card.hidden = !pending;
+    if (pending) {
+      $("proposalText").textContent =
+        (prop.name || prop.symbol) + " " + prop.qty + " 股，约 " + money(prop.amount) + "（" + (prop.why || "") + "）";
+    }
+  }
+
   $("fixed").innerHTML = (d.fixed || []).map((i) =>
     '<li><span class="p">' + i.name + '</span><span class="s">' + money(i.amount) + "</span></li>"
   ).join("") || '<li class="empty">无</li>';
@@ -115,6 +126,16 @@ async function trade(action) {
   $("tradeHint").textContent = res ? "成交。" : "没成交（看看提示或余额）";
   loadStatus();
 }
+
+async function resolveProposal(action) {
+  $("proposalHint").textContent = "处理中…";
+  const res = await post("invest/proposal", { action: action });
+  $("proposalHint").textContent = res ? (action === "approve" ? "同意了。" : "已驳回。") : "失败了";
+  loadStatus();
+}
+
+$("approveBtn").addEventListener("click", () => resolveProposal("approve"));
+$("rejectBtn").addEventListener("click", () => resolveProposal("reject"));
 
 $("buyBtn").addEventListener("click", () => trade("buy"));
 $("sellBtn").addEventListener("click", () => trade("sell"));
