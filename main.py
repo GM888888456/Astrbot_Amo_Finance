@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.5.0"
+PLUGIN_VERSION = "1.5.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -796,6 +796,7 @@ class AmoFinancePlugin(Star):
             "amount": round(price * qty, 2),
             "why": "今天涨了，我觉得还能涨，想加仓",
             "status": "pending",
+            "created_date": self._today(),
             "ts": _now(),
         }
         self._state["invest_proposal"] = proposal
@@ -836,18 +837,21 @@ class AmoFinancePlugin(Star):
             equity = self._ledger.balance + pf.summarize(self._positions(), self._fx())["total_value"]
             self._state["invest_day"] = {"date": today, "open": round(equity, 2)}
             self._save()
+        stance = str((self.market_stance() or {}).get("stance") or "")
+        if stance == "overconfident":
+            # 上头了：今天不自己偷偷买，而是提一个加仓提案等他点头（提案本身一天一次）
+            proposal = self.pending_proposal() or {}
+            if (proposal.get("status") != "pending"
+                    and str(proposal.get("created_date") or "") != today):
+                self.invest_propose()
+
         if self._state.get("invest_auto_date") == today:
             return
         if not self._bool("invest_auto_trade", True):
             return
         self._state["invest_auto_date"] = today
         self._save()
-        stance = str((self.market_stance() or {}).get("stance") or "")
         if stance == "overconfident":
-            # 上头了：今天不自己偷偷买，而是提一个加仓提案等他点头
-            proposal = self.pending_proposal() or {}
-            if proposal.get("status") != "pending" and str(proposal.get("date") or "") != today:
-                self.invest_propose()
             actions = []
         else:
             actions = pf.suggest_actions(
