@@ -1,5 +1,9 @@
 # 更新日志
 
+## 1.8.0（吃饭：菜价、买菜、进食审批）
+
+- 新增 `groceries.py`（菜价/市价：城市档位 × 季节 × 天气 × 节假日 × 当日波动，同一天同一价）与 `ledger.py` 的现成餐/饮品/食材/菜谱表；`food_quote()` 报菜单、`food_buy()` 买菜入库、`food_propose()` 走审批器（余额不够返回 `no_money`，一分不扣）；接口 `/food/quote`、`/food/propose`、`/food/buy`、`/market`。
+
 ## 1.7.0（借钱：转账与红包）
 
 - 新增 `borrow(amount, kind)`：算欠款、不算收入；转账每天最多一万，

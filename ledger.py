@@ -27,6 +27,7 @@ DEFAULT_PRICES: dict[str, float] = {
     "外卖": 35.0, "地铁": 4.0, "打车": 28.0, "零食": 15.0, "水果": 22.0,
     "挂号": 50.0, "买药": 60.0, "门诊": 320.0, "输液": 480.0,
     "住院": 12000.0, "手术": 8000.0, "体检": 600.0,
+    "泡面": 5.0, "食堂": 15.0, "酸菜鱼": 50.0, "火锅": 90.0,
     "电影": 55.0, "奶茶聚会": 60.0, "网购": 180.0, "化妆品": 320.0,
     "水电": 180.0, "燃气": 60.0, "物业": 300.0, "网费": 100.0, "话费": 50.0,
 }
@@ -301,3 +302,212 @@ def anxiety_from(ledger: Ledger, fixed_total: float) -> float:
     if ratio <= 0.2:
         return 1.0
     return round((2.0 - ratio) / 1.8, 3)
+
+
+# ---------------------------------------------------------------------------
+# 吃饭：现成的饭 / 食材 / 菜谱 / 饮品
+# ---------------------------------------------------------------------------
+#
+# 三条口径，别混：
+#
+# - **现成的饭**：一份多少钱、吃下去回多少饱食度，钱直接走账本；
+# - **食材**：按「份」计价，先去菜场买回家（进食材柜），做饭时消耗；
+# - **菜谱**：一份菜用哪几样食材、回多少饱食度、大概做多久。
+#
+# 价格都以**二线城市**为基准，别处按 `food_index()` 缩放；面板改的是物价表本身。
+
+#: 现成的饭。`price_key` 指向物价表（面板可改价），`satiety` 是恢复点数。
+READY_FOODS: dict[str, dict[str, Any]] = {
+    "泡面": {"price_key": "泡面", "satiety": 15, "note": "热水一冲，五分钟"},
+    "早餐": {"price_key": "早餐", "satiety": 30, "note": "楼下包子豆浆"},
+    "食堂": {"price_key": "食堂", "satiety": 35, "note": "食堂打一份"},
+    "午餐": {"price_key": "午餐", "satiety": 45, "note": "一份盖饭"},
+    "晚餐": {"price_key": "晚餐", "satiety": 50, "note": "炒两个菜"},
+    "外卖": {"price_key": "外卖", "satiety": 45, "note": "点个外卖"},
+    "酸菜鱼": {"price_key": "酸菜鱼", "satiety": 40, "note": "一份，吃不完打包"},
+    "火锅": {"price_key": "火锅", "satiety": 55, "note": "一顿顶一天"},
+}
+
+#: 饮品。水是家里烧的，不要钱；奶茶是真的花钱。
+DRINKS: dict[str, dict[str, Any]] = {
+    "水": {"price_key": "", "price": 0.0, "hydration": 15, "satiety": 0, "note": "自己烧的"},
+    "矿泉水": {"price_key": "", "price": 2.0, "hydration": 20, "satiety": 0, "note": "楼下小卖部"},
+    "奶茶": {"price_key": "奶茶", "hydration": 12, "satiety": 10, "note": "七分糖"},
+    "咖啡": {"price_key": "咖啡", "hydration": 8, "satiety": 5, "note": "续命"},
+}
+
+#: 食材单价（元/斤，二线基准）。这是**兜底价**：装得到 groceries.py 就用它按
+#: 城市/季节/天气算的当日价，这里只防那个模块缺失。
+DEFAULT_INGREDIENTS: dict[str, float] = {
+    "大米": 3.2, "面条": 4.5, "面粉": 3.0, "馒头": 1.2, "鸡蛋": 6.8,
+    "猪肉": 16.0, "鸡肉": 12.0, "牛肉": 38.0, "豆腐": 3.1, "牛奶": 12.6,
+    "青菜": 3.1, "土豆": 2.1, "番茄": 4.3, "菇类": 8.3,
+    "葱姜蒜": 1.5, "油盐酱醋": 2.0,
+}
+
+#: 菜谱：一份用哪些食材（**斤两**，按 groceries 的单位）、回多少饱食度、做多久。
+RECIPES: dict[str, dict[str, Any]] = {
+    "番茄炒蛋盖饭": {
+        "items": {"大米": 0.25, "番茄": 0.6, "鸡蛋": 0.3, "油盐酱醋": 0.15},
+        "satiety": 45, "minutes": 25, "note": "番茄炒蛋拌饭，热乎的",
+    },
+    "蛋炒饭": {
+        "items": {"大米": 0.3, "鸡蛋": 0.2, "油盐酱醋": 0.1},
+        "satiety": 38, "minutes": 15, "note": "剩饭加个蛋",
+    },
+    "清汤面": {
+        "items": {"面条": 0.3, "鸡蛋": 0.2, "青菜": 0.3, "油盐酱醋": 0.1},
+        "satiety": 32, "minutes": 10, "note": "一碗清汤面，撒点葱",
+    },
+    "土豆炖肉": {
+        "items": {"土豆": 0.6, "猪肉": 0.4, "油盐酱醋": 0.2},
+        "satiety": 55, "minutes": 45, "note": "炖一锅，能吃两顿",
+    },
+    "青菜豆腐汤饭": {
+        "items": {"大米": 0.25, "青菜": 0.4, "豆腐": 0.4, "油盐酱醋": 0.1},
+        "satiety": 35, "minutes": 20, "note": "清淡，胃舒服",
+    },
+}
+
+#: 二线城市的每日饭钱基准，用来算城市系数（见 CITY_TIERS）。
+_FOOD_BASE = 75.0
+
+
+def food_index(city: str) -> float:
+    """城市吃饭贵多少：二线 = 1.0，一线约 1.47，三线 0.8。"""
+    try:
+        base = float(CITY_TIERS[city_level(city)]["food_day"])
+    except Exception:
+        base = _FOOD_BASE
+    return round(base / _FOOD_BASE, 3)
+
+
+def _groceries():
+    """菜价权威模块（groceries.py）：城市档位 × 季节 × 天气 × 节假日 × 当日波动。
+
+    拿不到就返回 None，宁可退回内置基准价，也不能把菜价算错。
+    """
+    try:
+        from . import groceries as module
+    except ImportError:
+        try:
+            import groceries as module  # type: ignore
+        except Exception:
+            return None
+    return module
+
+
+def ingredient_price(item: str, city: str = "", weather: str = "",
+                     holiday: str = "") -> float:
+    """一份食材今天的价。优先问 groceries，问不到才用内置基准价。"""
+    name = str(item or "")
+    module = _groceries()
+    if module is not None:
+        try:
+            price = module.price_of(name, city_level=city_level(city),
+                                    weather=weather, holiday=holiday)
+            if price and price > 0:
+                return round(float(price), 2)
+        except Exception:
+            pass
+    raw = float(DEFAULT_INGREDIENTS.get(name, 3.0))
+    return round(raw * food_index(city), 2)
+
+
+def ready_price(name: str, prices: dict[str, float], city: str = "") -> float:
+    """一份现成的饭多少钱。价格表里没有就用内置默认。"""
+    spec = READY_FOODS.get(str(name or ""))
+    if not spec:
+        return 0.0
+    key = str(spec.get("price_key") or name)
+    raw = float(prices.get(key) or DEFAULT_PRICES.get(key) or 0.0)
+    return round(raw * food_index(city), 2)
+
+
+def drink_price(name: str, prices: dict[str, float], city: str = "") -> float:
+    spec = DRINKS.get(str(name or ""))
+    if not spec:
+        return 0.0
+    key = str(spec.get("price_key") or "")
+    if not key:
+        return round(float(spec.get("price") or 0.0) * food_index(city), 2)
+    raw = float(prices.get(key) or DEFAULT_PRICES.get(key) or 0.0)
+    return round(raw * food_index(city), 2)
+
+
+def recipe_cost(name: str, city: str = "", weather: str = "",
+                holiday: str = "") -> float:
+    """自己做一顿的食材成本。随季节/天气变，因为菜价会变。"""
+    recipe = RECIPES.get(str(name or ""))
+    if not recipe:
+        return 0.0
+    total = 0.0
+    for item, need in (recipe.get("items") or {}).items():
+        total += ingredient_price(item, city, weather, holiday) * float(need)
+    return round(total, 2)
+
+
+def grocery_cost(want: dict[str, float], city: str = "", weather: str = "",
+                 holiday: str = "") -> tuple[float, list[dict[str, Any]]]:
+    """买菜要花多少，顺便把明细算出来。"""
+    total = 0.0
+    items: list[dict[str, Any]] = []
+    for item, qty in (want or {}).items():
+        try:
+            amount = float(qty)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        unit = ingredient_price(item, city, weather, holiday)
+        line = round(unit * amount, 2)
+        total += line
+        items.append({"item": str(item), "qty": round(amount, 2),
+                      "unit": unit, "amount": line})
+    return round(total, 2), items
+
+
+def food_options(city: str, prices: dict[str, float],
+                 pantry: dict[str, float] | None = None,
+                 weather: str = "", holiday: str = "") -> dict[str, Any]:
+    """当前能吃什么：现成的饭 + 自己做的菜（带缺什么）。"""
+    have = {str(k): float(v) for k, v in (pantry or {}).items()}
+    ready = []
+    for name, spec in READY_FOODS.items():
+        ready.append({
+            "name": name,
+            "price": ready_price(name, prices, city),
+            "satiety": int(spec.get("satiety") or 0),
+            "note": str(spec.get("note") or ""),
+        })
+    ready.sort(key=lambda x: x["price"])
+
+    cook = []
+    for name, spec in RECIPES.items():
+        missing = []
+        for item, need in (spec.get("items") or {}).items():
+            need = float(need)
+            if have.get(item, 0.0) + 1e-9 < need:
+                missing.append({"item": item, "need": round(need, 2),
+                                "have": round(have.get(item, 0.0), 2)})
+        cook.append({
+            "name": name,
+            "cost": recipe_cost(name, city, weather, holiday),
+            "satiety": int(spec.get("satiety") or 0),
+            "minutes": int(spec.get("minutes") or 20),
+            "note": str(spec.get("note") or ""),
+            "can_cook": not missing,
+            "missing": missing,
+        })
+    cook.sort(key=lambda x: x["cost"])
+    return {
+        "city": str(city or ""),
+        "level": city_level(city),
+        "index": food_index(city),
+        "ready": ready,
+        "cook": cook,
+        "ingredients": {
+            k: ingredient_price(k, city, weather, holiday)
+            for k in (_groceries().INGREDIENTS if _groceries() is not None else DEFAULT_INGREDIENTS)
+        },
+    }

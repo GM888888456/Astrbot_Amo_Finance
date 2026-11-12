@@ -65,8 +65,13 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import market as market_mod  # type: ignore
     import portfolio as pf  # type: ignore
 
+try:  # 吃饭相关的表和纯函数都在 ledger 里
+    from . import ledger as _ledger_mod
+except ImportError:  # 直接按文件加载时
+    import ledger as _ledger_mod  # type: ignore
+
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.7.0"
+PLUGIN_VERSION = "1.8.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1123,6 +1128,238 @@ class AmoFinancePlugin(Star):
                 pass
         return {"code": 1, "message": message}
 
+    # ------------------------------------------------------------------
+    # 吃饭：报价 → 审批 → 扣款 → 记饱食度
+    # ------------------------------------------------------------------
+    # 挂载插件和终端都不许直接改饱食度，只能走 food_propose；钱只在账本里动。
+
+    def _data(self):
+        """找记忆库（饱食度、食材柜都在它那儿）。找不到返回 None。"""
+        try:
+            from . import link as _l
+        except ImportError:
+            import link as _l  # type: ignore
+        try:
+            return _l._find(getattr(self, "context", None),
+                            _l.DATA_NAMES, _l.DATA_MARKERS, require_mem=True)
+        except Exception:
+            return None
+
+    def _pantry_map(self) -> dict[str, float]:
+        data = self._data()
+        getter = getattr(data, "pantry", None) if data is not None else None
+        if not callable(getter):
+            return {}
+        try:
+            items = getter() or []
+        except Exception:
+            return {}
+        out: dict[str, float] = {}
+        for item in items:
+            try:
+                out[str(item.get("item"))] = float(item.get("qty") or 0)
+            except Exception:
+                continue
+        return out
+
+    def vitals(self) -> dict[str, Any]:
+        """当前饱食度/水分（只读）。"""
+        data = self._data()
+        getter = getattr(data, "vitals", None) if data is not None else None
+        if not callable(getter):
+            return {}
+        try:
+            return getter() or {}
+        except Exception:
+            return {}
+
+    def _groceries(self):
+        """菜价/药价模块（Finance 自己的 groceries.py）。"""
+        return getattr(_ledger_mod, "_groceries", lambda: None)()
+
+    def market_today(self) -> dict[str, Any]:
+        """今天的菜价：城市档位 × 季节 × 天气 × 节假日，同一天问几次都一样。"""
+        module = self._groceries()
+        if module is None:
+            return {"ok": False, "reason": "没有菜价模块"}
+        city = self._city()
+        level = _ledger_mod.city_level(city)
+        weather = ""
+        try:
+            companion = self._companion()
+            state = getattr(companion, "state", None)
+            weather = str(((getattr(state, "weather", None) or {}) or {}).get("text") or "")
+        except Exception:
+            weather = ""
+        try:
+            data = module.market_day(city_level=level, weather=weather)
+        except Exception as exc:
+            logger.debug("[amo_fin] 取菜价失败: %s" % exc)
+            return {"ok": False, "reason": str(exc)}
+        data["ok"] = True
+        data["city"] = city
+        return data
+
+    def drug_price(self, key: str, channel: str = "药店") -> float:
+        module = self._groceries()
+        if module is None:
+            return 0.0
+        try:
+            return float(module.drug_price(key, channel))
+        except Exception:
+            return 0.0
+
+    def drugs_for(self, illness: str) -> list:
+        module = self._groceries()
+        if module is None:
+            return []
+        try:
+            return module.drugs_for(illness)
+        except Exception:
+            return []
+
+    def food_quote(self) -> dict[str, Any]:
+        """现在能吃什么、多少钱、能回多少饱食度、自己做饭缺什么料。"""
+        city = self._city()
+        options = _ledger_mod.food_options(city, self._prices(), self._pantry_map())
+        options["balance"] = round(self.balance(), 2)
+        options["vitals"] = self.vitals()
+        return options
+
+    def food_buy(self, want: dict[str, Any], request_id: str = "") -> dict[str, Any]:
+        """买菜：先算钱、扣到钱才往食材柜里放。"""
+        city = self._city()
+        total, items = _ledger_mod.grocery_cost(want or {}, city)
+        if not items:
+            return {"ok": False, "code": "bad_request", "reason": "没说要买什么"}
+        rid = str(request_id or "").strip() or "food-buy-%d" % int(_now() // 60)
+        result = self.charge(total, reason="买菜", payee="菜场", request_id=rid)
+        if not result.get("ok"):
+            return {
+                "ok": False, "code": "no_money", "reason": "买菜的钱不够",
+                "total": total, "items": items, "balance": round(self.balance(), 2),
+                "short": round(float(result.get("short") or 0), 2),
+            }
+        data = self._data()
+        stored = []
+        adder = getattr(data, "pantry_add", None) if data is not None else None
+        if callable(adder):
+            for line in items:
+                try:
+                    adder(line["item"], line["qty"])
+                    stored.append(line["item"])
+                except Exception as exc:
+                    logger.debug("[amo_fin] 食材入库失败 %s: %s" % (line.get("item"), exc))
+        return {
+            "ok": True, "total": total, "items": items, "stored": stored,
+            "balance": round(self.balance(), 2),
+            "pantry": self._pantry_map(),
+        }
+
+    def food_propose(self, name: str, method: str = "order",
+                     request_id: str = "") -> dict[str, Any]:
+        """进食提案（审批器）。
+
+        - ``order``：买现成的，按物价表扣钱，再回记忆库加饱食度；
+        - ``cook``：自己做饭，先看食材柜够不够，够了才扣食材、加饱食度（不再扣钱，
+          食材的钱在买的时候已经付过）；
+        - ``drink``：喝水/奶茶，加水分（奶茶顺带一点饱食度）；
+        - ``grocery``：只买菜，等同 :meth:`food_buy`。
+
+        余额不够一律返回 ``code="no_money"``，**不扣、不加**，让终端把它变成情绪。
+        """
+        dish = str(name or "").strip()
+        if not dish:
+            return {"ok": False, "code": "bad_request", "reason": "没说要吃什么"}
+        mode = str(method or "order").strip().lower()
+        mode = {"eat": "order", "吃": "order", "做饭": "cook", "做": "cook",
+                "喝": "drink", "喝水": "drink", "买": "grocery", "买菜": "grocery"}.get(mode, mode)
+        if mode == "grocery":
+            return self.food_buy({dish: 1.0}, request_id=request_id)
+
+        city = self._city()
+        data = self._data()
+        cost = 0.0
+        satiety = 0
+        hydration = 0
+        payee = "饭馆"
+        reason = ""
+
+        if mode == "drink":
+            spec = _ledger_mod.DRINKS.get(dish)
+            if spec is None:
+                return {"ok": False, "code": "unknown", "reason": "没有这种喝的"}
+            cost = _ledger_mod.drink_price(dish, self._prices(), city)
+            hydration = int(spec.get("hydration") or 0)
+            satiety = int(spec.get("satiety") or 0)
+            payee = "小卖部" if cost > 0 else "家里"
+            reason = "喝的：%s" % dish
+        elif mode == "cook":
+            spec = _ledger_mod.RECIPES.get(dish)
+            if spec is None:
+                return {"ok": False, "code": "unknown", "reason": "不会做这道菜"}
+            pantry = self._pantry_map()
+            missing = []
+            for item, need in (spec.get("items") or {}).items():
+                have = float(pantry.get(item, 0.0))
+                if have + 1e-9 < float(need):
+                    missing.append({"item": item, "need": round(float(need), 2),
+                                    "have": round(have, 2)})
+            if missing:
+                return {"ok": False, "code": "need_grocery", "reason": "食材不够",
+                        "dish": dish, "missing": missing,
+                        "grocery": _ledger_mod.grocery_cost(
+                            {m["item"]: m["need"] - m["have"] for m in missing}, city)[0]}
+            satiety = int(spec.get("satiety") or 0)
+            payee = "家里"
+            reason = "自己做饭：%s" % dish
+        else:
+            spec = _ledger_mod.READY_FOODS.get(dish)
+            if spec is None:
+                return {"ok": False, "code": "unknown", "reason": "没这道菜"}
+            cost = _ledger_mod.ready_price(dish, self._prices(), city)
+            satiety = int(spec.get("satiety") or 0)
+            reason = "吃饭：%s" % dish
+
+        rid = str(request_id or "").strip()
+        if not rid:
+            rid = "food-%s-%s-%d" % (mode, dish, int(_now() // 60))
+        if cost > 0:
+            result = self.charge(cost, reason=reason, payee=payee, request_id=rid)
+            if not result.get("ok"):
+                return {
+                    "ok": False, "code": "no_money", "reason": "没钱了",
+                    "dish": dish, "price": round(cost, 2),
+                    "short": round(float(result.get("short") or 0), 2),
+                    "balance": round(self.balance(), 2), "satiety": satiety,
+                }
+
+        if mode == "cook" and data is not None:
+            taker = getattr(data, "pantry_take", None)
+            if callable(taker):
+                for item, need in (_ledger_mod.RECIPES.get(dish, {}).get("items") or {}).items():
+                    try:
+                        taker(item, float(need))
+                    except Exception as exc:
+                        logger.debug("[amo_fin] 扣食材失败 %s: %s" % (item, exc))
+
+        after: dict[str, Any] = {}
+        if data is not None:
+            try:
+                if satiety > 0:
+                    after = data.eat(satiety, note=dish) or {}
+                if hydration > 0:
+                    after = data.drink(hydration, note=dish) or after
+            except Exception as exc:
+                logger.debug("[amo_fin] 记饱食度失败: %s" % exc)
+
+        return {
+            "ok": True, "dish": dish, "method": mode,
+            "price": round(cost, 2), "satiety": satiety, "hydration": hydration,
+            "reason": reason, "balance": round(self.balance(), 2),
+            "vitals": after, "pantry": self._pantry_map() if mode == "cook" else None,
+        }
+
     def _register_web_apis(self) -> None:
         routes = [
             ("/status", self.api_status, ["GET"]),
@@ -1134,6 +1371,10 @@ class AmoFinancePlugin(Star):
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
             ("/income", self.api_income, ["POST"]),
+            ("/food/quote", self.api_food_quote, ["GET", "POST"]),
+            ("/food/propose", self.api_food_propose, ["POST"]),
+            ("/food/buy", self.api_food_buy, ["POST"]),
+            ("/market", self.api_market, ["GET"]),
         ]
         for path, handler, methods in routes:
             try:
@@ -1160,6 +1401,33 @@ class AmoFinancePlugin(Star):
             except Exception:
                 raw = None
         return raw if isinstance(raw, dict) else {}
+
+    async def api_market(self):
+        return self._json({"code": 0, "data": self.market_today()})
+
+    async def api_food_quote(self):
+        return self._json({"code": 0, "data": self.food_quote()})
+
+    async def api_food_propose(self):
+        payload = await self._payload()
+        name = str(payload.get("name") or payload.get("dish") or "").strip()
+        method = str(payload.get("method") or "order").strip()
+        return self._json(self.food_propose(name, method,
+                                           str(payload.get("request_id") or "")))
+
+    async def api_food_buy(self):
+        payload = await self._payload()
+        want = payload.get("items") if isinstance(payload.get("items"), dict) else None
+        if not want:
+            name = str(payload.get("item") or "").strip()
+            if not name:
+                return self._json({"ok": False, "code": "bad_request", "reason": "没说要买什么"})
+            try:
+                qty = float(payload.get("qty") or 1)
+            except (TypeError, ValueError):
+                qty = 1.0
+            want = {name: qty}
+        return self._json(self.food_buy(want, str(payload.get("request_id") or "")))
 
     async def api_health(self):
         """我自己连没连上终端/记忆库。面板顶部那一行就看这个。"""
