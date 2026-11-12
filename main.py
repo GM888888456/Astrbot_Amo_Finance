@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_VERSION = "1.3.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -962,6 +962,7 @@ class AmoFinancePlugin(Star):
             "anxiety": snap["anxiety"], "own_house": snap["own_house"],
             "own_car": snap["own_car"],
             "salary": snap.get("salary") or self.salary_info(),
+            "invest": snap.get("invest") or self.invest_summary(),
             "uptime": int(_now() - self._started_at),
         }})
 
