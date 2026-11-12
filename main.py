@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.5.1"
+PLUGIN_VERSION = "1.5.2"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -760,50 +760,51 @@ class AmoFinancePlugin(Star):
     def invest_propose(self) -> dict[str, Any]:
         """过度自信的时候提一个加仓提案：等他点头才买。
 
-        提案故意激进（想拿买房钱上车），被驳回才是重点——她会撒娇。
+        提案故意激进（嘴上说拿买房钱上车），但真下单仍守三成上限；
+        已在手里的那只没空间了，就换一只没买的。
         """
         row = self._state.get("invest_proposal")
         if isinstance(row, dict) and row.get("status") == "pending":
             return {"ok": False, "reason": "已经有一个提案在等他点头了", "proposal": row}
         positions = self._positions()
-        symbol = ""
+        candidates = []
         if positions:
-            symbol = max(positions, key=lambda code: int((positions[code] or {}).get("qty") or 0))
-        elif self._watchlist():
-            symbol = self._watchlist()[0]
-        if not symbol:
-            return {"ok": False, "reason": "没有可买的股票"}
-        data = self._board().quotes([symbol]).get(symbol)
-        if not data:
-            return {"ok": False, "reason": "行情拿不到"}
-        price = float(data["price"])
-        market = market_mod.market_of(symbol)
-        # 嘴上说「全投进去」，真要下单还是得守三成上限——不然点「同意」也买不进来
+            candidates.append(max(positions, key=lambda code: int((positions[code] or {}).get("qty") or 0)))
+        for code in self._watchlist():
+            if code not in candidates:
+                candidates.append(code)
         summary = self.invest_summary()
         equity = max(summary["equity"], 1.0)
-        held = float((self._positions().get(symbol) or {}).get("qty") or 0) * price
-        room = max(0.0, equity * pf.MAX_WEIGHT - held)
-        budget = min(self._ledger.balance * 0.5, room * 0.9)
-        qty = pf.qty_from_budget(budget, price, market)
-        if qty <= 0:
-            return {"ok": False, "reason": "钱不够买一手"}
-        proposal = {
-            "id": "p-%d" % int(_now()),
-            "symbol": symbol,
-            "name": data.get("name") or symbol,
-            "qty": qty,
-            "price": price,
-            "amount": round(price * qty, 2),
-            "why": "今天涨了，我觉得还能涨，想加仓",
-            "status": "pending",
-            "created_date": self._today(),
-            "ts": _now(),
-        }
-        self._state["invest_proposal"] = proposal
-        self._save()
-        logger.info("[amo_fin] 她提了个加仓提案：%s %d 股（¥%.0f）"
-                    % (proposal["name"], qty, proposal["amount"]))
-        return {"ok": True, "proposal": proposal}
+        for symbol in candidates:
+            data = self._board().quotes([symbol]).get(symbol)
+            if not data:
+                continue
+            price = float(data["price"])
+            market = market_mod.market_of(symbol)
+            held = float((positions.get(symbol) or {}).get("qty") or 0) * price
+            room = max(0.0, equity * pf.MAX_WEIGHT - held)
+            budget = min(self._ledger.balance * 0.5, room * 0.9)
+            qty = pf.qty_from_budget(budget, price, market)
+            if qty <= 0:
+                continue
+            proposal = {
+                "id": "p-%d" % int(_now()),
+                "symbol": symbol,
+                "name": data.get("name") or symbol,
+                "qty": qty,
+                "price": price,
+                "amount": round(price * qty, 2),
+                "why": "今天涨了，我觉得还能涨，想加仓",
+                "status": "pending",
+                "created_date": self._today(),
+                "ts": _now(),
+            }
+            self._state["invest_proposal"] = proposal
+            self._save()
+            logger.info("[amo_fin] 她提了个加仓提案：%s %d 股（¥%.0f）"
+                        % (proposal["name"], qty, proposal["amount"]))
+            return {"ok": True, "proposal": proposal}
+        return {"ok": False, "reason": "没有一只能加仓的（仓位或余额不够）"}
 
     def invest_resolve_proposal(self, approve: bool) -> dict[str, Any]:
         """同意就买，驳回就记下来（她会委屈，但不会真生气）。"""
