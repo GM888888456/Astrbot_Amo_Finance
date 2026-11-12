@@ -78,17 +78,6 @@ async function loadStatus() {
     (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>"
   ).join("") || '<li class="empty">还没有持仓，等她自己去买，或者你手动下一单</li>';
 
-  const prop = inv.proposal || null;
-  const card = $("proposalCard");
-  if (card) {
-    const pending = prop && prop.status === "pending";
-    card.hidden = !pending;
-    if (pending) {
-      $("proposalText").textContent =
-        (prop.name || prop.symbol) + " " + prop.qty + " 股，约 " + money(prop.amount) + "（" + (prop.why || "") + "）";
-    }
-  }
-
   $("fixed").innerHTML = (d.fixed || []).map((i) =>
     '<li><span class="p">' + i.name + '</span><span class="s">' + money(i.amount) + "</span></li>"
   ).join("") || '<li class="empty">无</li>';
@@ -114,31 +103,17 @@ async function loadHistory() {
   }).join("");
 }
 
-async function trade(action) {
-  const symbol = ($("tradeSymbol").value || "").trim();
-  const qty = Number($("tradeQty").value || 0);
-  if (!symbol) { $("tradeHint").textContent = "先填个代码"; return; }
-  const body = action === "buy"
-    ? { action: "buy", symbol: symbol, qty: qty || 0, budget: qty ? 0 : 5000 }
-    : { action: "sell", symbol: symbol, qty: qty || 0, all_out: !qty };
-  $("tradeHint").textContent = "下单中…";
-  const res = await post("invest/trade", body);
-  $("tradeHint").textContent = res ? "成交。" : "没成交（看看提示或余额）";
+async function topUp() {
+  const amount = Number($("topupInput").value || 0);
+  if (!amount) { $("topupHint").textContent = "填个金额"; return; }
+  $("topupHint").textContent = "转账中…";
+  const res = await post("income", { amount: amount, reason: "他转给我的" });
+  $("topupHint").textContent = res ? "已到账。" : "失败了";
+  $("topupInput").value = "";
   loadStatus();
 }
 
-async function resolveProposal(action) {
-  $("proposalHint").textContent = "处理中…";
-  const res = await post("invest/proposal", { action: action });
-  $("proposalHint").textContent = res ? (action === "approve" ? "同意了。" : "已驳回。") : "失败了";
-  loadStatus();
-}
-
-$("approveBtn").addEventListener("click", () => resolveProposal("approve"));
-$("rejectBtn").addEventListener("click", () => resolveProposal("reject"));
-
-$("buyBtn").addEventListener("click", () => trade("buy"));
-$("sellBtn").addEventListener("click", () => trade("sell"));
+$("topupBtn").addEventListener("click", topUp);
 
 $("saveSalary").addEventListener("click", async () => {
   const value = Number($("salaryInput").value || 0);

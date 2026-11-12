@@ -175,23 +175,69 @@ class LeekTests(unittest.TestCase):
         p.mood_signal = lambda: {"day_pnl_pct": 0.1, "day_pnl": 0}
         self.assertEqual(p.market_stance()["stance"], first["stance"], "当天触发过就锁住")
 
-    def test_proposal_created_and_rejected(self):
+    def test_overconfident_buys_without_approval(self):
+        """上头时她自己加仓：没有审批、没有按钮。"""
         p = self._plugin(4.0)
-        p.invest_propose()
-        prop = p.pending_proposal()
-        self.assertEqual(prop["status"], "pending")
-        self.assertGreater(prop["qty"], 0)
-        result = p.invest_resolve_proposal(False)
-        self.assertEqual(result["status"], "rejected")
-        self.assertFalse(p._positions(), "驳回就不该买")
+        p._leek_add_position()
+        record = p._state.get("invest_leek") or {}
+        self.assertEqual(record.get("kind"), "bought", record)
+        self.assertTrue(p._positions(), "应该真的买了")
 
-    def test_proposal_approved_buys(self):
+    def test_overconfident_runs_once_per_day(self):
         p = self._plugin(4.0)
-        p.invest_propose()
-        result = p.invest_resolve_proposal(True)
-        self.assertTrue(result["ok"], result)
-        self.assertTrue(p._positions())
+        p._leek_add_position()
+        first = p._state.get("invest_leek")
+        balance = p._ledger.balance
+        p._leek_add_position()
+        self.assertEqual(p._state.get("invest_leek"), first)
+        self.assertAlmostEqual(p._ledger.balance, balance, msg="一天只加一次")
 
-    def test_resolve_without_proposal(self):
+    def test_no_money_is_recorded_for_sulking(self):
+        """没钱加仓：记下来，让她去撒娇要钱。"""
         p = self._plugin(4.0)
-        self.assertFalse(p.invest_resolve_proposal(True)["ok"])
+        p._ledger.balance = 100.0
+        p._leek_add_position()
+        record = p._state.get("invest_leek") or {}
+        self.assertEqual(record.get("kind"), "no_money", record)
+
+    def test_position_cap_blocks_and_records(self):
+        p = self._plugin(4.0)
+        p._ledger.balance = 10 ** 7
+        p.invest_buy("sh601318", qty=100)
+        # 把权重顶到上限：手动加一笔，让 room 归零
+        p._positions()["sh601318"]["qty"] = 10 ** 5
+        p._leek_add_position()
+        record = p._state.get("invest_leek") or {}
+        self.assertIn(record.get("kind"), ("no_room", "failed"), record)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class LeekTests(unittest.TestCase):
+    """韭菜特质：涨了上头提加仓，亏了死扛。"""
+
+    def _plugin(self, pct):
+        p = build(quotes={"sh601318": quote("sh601318", "中国平安", 50.0, 50.0)})
+        p.config = {"invest_watchlist": "601318"}
+        p.mood_signal = lambda: {"day_pnl_pct": pct, "day_pnl": pct * 10}
+        return p
+
+    def test_overconfident_on_big_gain(self):
+        p = self._plugin(4.0)
+        self.assertEqual(p.market_stance()["stance"], "overconfident")
+
+    def test_hodl_on_big_loss(self):
+        p = self._plugin(-4.0)
+        self.assertEqual(p.market_stance()["stance"], "hodl")
+
+    def test_normal_on_small_move(self):
+        p = self._plugin(0.5)
+        self.assertEqual(p.market_stance()["stance"], "")
+
+    def test_stance_sticky_for_the_day(self):
+        p = self._plugin(4.0)
+        first = p.market_stance()
+        p.mood_signal = lambda: {"day_pnl_pct": 0.1, "day_pnl": 0}
+        self.assertEqual(p.market_stance()["stance"], first["stance"], "当天触发过就锁住")
