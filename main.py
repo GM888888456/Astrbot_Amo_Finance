@@ -32,6 +32,7 @@ except Exception:  # pragma: no cover
 try:
     from .ledger import (
         Ledger,
+        average_salary,
         anxiety_from,
         city_level,
         city_profile,
@@ -42,6 +43,7 @@ try:
 except Exception:  # pragma: no cover - 以脚本方式加载时
     from ledger import (  # type: ignore
         Ledger,
+        average_salary,
         anxiety_from,
         city_level,
         city_profile,
@@ -56,7 +58,7 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.1.3"
+PLUGIN_VERSION = "1.2.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -99,6 +101,7 @@ class AmoFinancePlugin(Star):
         self._state: dict[str, Any] = {}
         self._history: list[dict[str, Any]] = []
         self._load()
+        self.ensure_tick_task()
         self._register_web_apis()
         logger.info(
             "[amo_fin] %s %s 已加载：余额 %.2f，流水 %d 条"
@@ -279,6 +282,68 @@ class AmoFinancePlugin(Star):
     def balance(self) -> float:
         return round(self._ledger.balance, 2)
 
+    # ------------------------------------------------------------------
+    # 薪资：人格里写了就用人格的，没写按城市平均
+    # ------------------------------------------------------------------
+
+    def salary_info(self) -> dict[str, Any]:
+        """这个月拿多少、哪来的、到手多少。
+
+        优先级：手动设置 > 人格设定 > 城市平均。人格没写薪资是很常见的事，
+        这时候不能凭空编一个 25000，也不能不给钱——按她所在城市的平均发。
+        """
+        manual = self._float("salary", 0)
+        persona = 0.0
+        try:
+            persona = float(self._state.get("salary_persona") or 0)
+        except Exception:
+            persona = 0.0
+        level = city_level(self._city())
+        if manual > 0:
+            gross, source = manual, "手动设置"
+        elif persona > 0:
+            gross, source = persona, "人格设定"
+        else:
+            gross, source = average_salary(self._city()), "城市平均（%s）" % level
+        pay = payroll(gross)
+        return {
+            "gross": round(gross, 2),
+            "net": pay["net"],
+            "tax": pay["tax"],
+            "social": pay["social_total"],
+            "source": source,
+            "city_level": level,
+            "pay_day": max(1, min(28, self._int("pay_day", 10))),
+        }
+
+    def set_salary(self, gross: float, source: str = "persona") -> dict[str, Any]:
+        """终端从人格里读到的月薪推过来。
+
+        手动配置优先：用户在面板/配置里填过，就不让人格里的旧数字覆盖它。
+        """
+        try:
+            value = round(float(gross or 0), 2)
+        except Exception:
+            value = 0.0
+        if value <= 0:
+            return {"ok": False, "reason": "金额不对"}
+        if source == "manual":
+            self.config["salary"] = value
+            try:
+                saver = getattr(self.config, "save_config", None)
+                if callable(saver):
+                    saver()
+            except Exception:
+                pass
+        elif self._float("salary", 0) > 0:
+            return {"ok": True, "skipped": True, "reason": "已手动设置月薪",
+                    "salary": self.salary_info()}
+        else:
+            self._state["salary_persona"] = value
+            self._save()
+        logger.info("[amo_fin] 月薪已设置：%.0f（%s）" % (value, source))
+        return {"ok": True, "salary": self.salary_info()}
+
     def snapshot(self) -> dict[str, Any]:
         data = self._ledger.snapshot()
         data["city"] = self._city()
@@ -286,6 +351,7 @@ class AmoFinancePlugin(Star):
         data["fixed"] = monthly_fixed(self._ledger, self._prices(), self._city())
         data["fixed_total"] = round(sum(item["amount"] for item in data["fixed"]), 2)
         data["anxiety"] = anxiety_from(self._ledger, data["fixed_total"])
+        data["salary"] = self.salary_info()
         return data
 
     def recent(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -353,6 +419,30 @@ class AmoFinancePlugin(Star):
     # 定时：发薪、固定支出
     # ------------------------------------------------------------------
 
+    TICK_INTERVAL = 300  # 每 5 分钟看一眼：该发薪/该交固定支出没有
+
+    def ensure_tick_task(self) -> None:
+        """起定时器。
+
+        以前 ``tick()`` 写好了但没有任何地方调用——工资永远发不出来，
+        固定支出也永远不扣。这里让金融插件自己跑，不依赖终端是否在跑。
+        """
+        task = getattr(self, "_tick_task", None)
+        if task is not None and not task.done():
+            return
+        try:
+            self._tick_task = asyncio.create_task(self._tick_loop())
+        except Exception as exc:  # 没有事件循环（单测/导入期）就静默跳过
+            logger.debug("[amo_fin] 定时器启动失败: %s" % exc)
+
+    async def _tick_loop(self) -> None:
+        while True:
+            try:
+                self.tick()
+            except Exception as exc:
+                logger.warning("[amo_fin] 月度结算失败: %s" % exc)
+            await asyncio.sleep(self.TICK_INTERVAL)
+
     def tick(self, now: datetime | None = None) -> dict[str, Any]:
         """检查该不该发工资 / 该不该交固定支出。幂等，重启不会重复扣。"""
         now = now or datetime.now()
@@ -363,7 +453,7 @@ class AmoFinancePlugin(Star):
         # 每月 10 号发工资
         pay_day = max(1, min(28, self._int("pay_day", 10)))
         if now.day >= pay_day and self._state.get("last_pay") != month:
-            gross = self._float("salary", 25000.0)
+            gross = self.salary_info()["gross"]
             bonus = 0.0
             if self._bool("bonus_enable", True) and self._state.get("last_pay") is None:
                 bonus = round(gross * 0.1, 2)  # 首月给一笔，之后按月随机
@@ -536,6 +626,7 @@ class AmoFinancePlugin(Star):
         routes = [
             ("/status", self.api_status, ["GET"]),
             ("/health", self.api_health, ["GET"]),
+            ("/salary", self.api_salary, ["POST"]),
             ("/history", self.api_history, ["GET"]),
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
@@ -572,6 +663,7 @@ class AmoFinancePlugin(Star):
         return self._json({"code": 0, "data": _link_probe(self)})
 
     async def api_status(self):
+        self.ensure_tick_task()
         snap = self.snapshot()
         return self._json({"code": 0, "data": {
             "name": PLUGIN_NAME, "version": PLUGIN_VERSION, "display_name": DISPLAY_NAME,
@@ -585,6 +677,19 @@ class AmoFinancePlugin(Star):
             "own_car": snap["own_car"],
             "uptime": int(_now() - self._started_at),
         }})
+
+    async def api_salary(self):
+        """读/改月薪。改了就按手动设置算，不再跟人格或城市平均。"""
+        data = await self._payload()
+        if "salary" in data:
+            try:
+                gross = float(data.get("salary") or 0)
+            except (TypeError, ValueError):
+                return self._json({"code": 1, "message": "月薪要是数字"})
+            result = self.set_salary(gross, source="manual")
+            if not result.get("ok"):
+                return self._json({"code": 1, "message": result.get("reason") or "设置失败"})
+        return self._json({"code": 0, "data": self.salary_info()})
 
     async def api_history(self):
         return self._json({"code": 0, "data": {"items": self.recent(100)}})

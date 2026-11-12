@@ -39,6 +39,12 @@ CITY_TIERS: dict[str, dict[str, Any]] = {
     "三线": {"rent": 1400, "food_day": 60, "transport": 180, "base": 9000},
 }
 
+#: 人格里没写月薪时，按城市档位取的平均月薪（税前，2025 年城镇单位就业人员口径取整）。
+#: 这是「市面上的平均」，不是最低工资——她要过日子，不是生存挑战。
+AVERAGE_SALARY: dict[str, float] = {
+    "一线": 13000.0, "新一线": 10000.0, "二线": 7800.0, "三线": 6000.0,
+}
+
 #: 城市名 → 档位。认不出就按二线。
 CITY_LEVEL: dict[str, str] = {
     "北京": "一线", "上海": "一线", "广州": "一线", "深圳": "一线",
@@ -69,6 +75,11 @@ def city_level(city: str) -> str:
         if name in text:
             return level
     return "二线"
+
+
+def average_salary(city: str) -> float:
+    """这座城市「平均月薪」大概多少（税前）。认不出的城市按二线。"""
+    return float(AVERAGE_SALARY.get(city_level(city), AVERAGE_SALARY["二线"]))
 
 
 def city_profile(city: str) -> dict[str, Any]:

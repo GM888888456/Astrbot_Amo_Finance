@@ -34,6 +34,8 @@ def _install_stub():
             return wrap
 
         command = llm_tool = on_llm_response = on_decorating_result = _decorator
+        permission_type = _decorator
+        on_astrbot_loaded = _decorator
 
     class Star:
         def __init__(self, context=None):

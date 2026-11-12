@@ -52,6 +52,12 @@ async function loadStatus() {
   $("spent").textContent = money(d.month_spent);
   $("earned").textContent = money(d.month_income);
   $("city").textContent = (d.city || "未配置") + " · " + d.city_level;
+  const pay = d.salary || {};
+  $("salaryGross").textContent = money(pay.gross);
+  $("salaryNet").textContent = money(pay.net);
+  $("salaryDay").textContent = pay.pay_day ? ("每月 " + pay.pay_day + " 号") : "—";
+  $("salarySource").textContent = pay.source || "—";
+  if (!$("salaryInput").value && pay.gross) $("salaryInput").value = Math.round(pay.gross);
   $("levelPill").textContent = d.own_house ? "有房" : "租房";
   $("fixedTotal").textContent = money(d.fixed_total) + "/月";
   const a = Number(d.anxiety || 0);
@@ -82,6 +88,17 @@ async function loadHistory() {
       sign + money(it.amount).slice(1) + "</span></li>";
   }).join("");
 }
+
+$("saveSalary").addEventListener("click", async () => {
+  const value = Number($("salaryInput").value || 0);
+  if (!value) {
+    $("salaryHint").textContent = "填一个正数；想恢复自动就把配置里的 salary 改成 0。";
+    return;
+  }
+  const res = await post("salary", { salary: value });
+  $("salaryHint").textContent = res ? "已保存。" : "保存失败。";
+  loadStatus();
+});
 
 $("saveAssets").addEventListener("click", async () => {
   const body = {

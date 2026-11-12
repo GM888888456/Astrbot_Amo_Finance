@@ -28,6 +28,21 @@
     </div>
 
     <div class="card">
+      <div class="card-title"><span>工资</span><span class="hint" id="salarySource">—</span></div>
+      <dl class="kv">
+        <dt>月薪（税前）</dt><dd id="salaryGross">—</dd>
+        <dt>到手</dt><dd id="salaryNet">—</dd>
+        <dt>发薪日</dt><dd id="salaryDay">—</dd>
+      </dl>
+      <div class="row">
+        <input id="salaryInput" type="number" min="0" step="100" placeholder="留空 = 自动（人格 → 城市平均）" />
+        <button class="btn" id="saveSalary">保存</button>
+        <span class="hint" id="salaryHint"></span>
+      </div>
+      <div class="meta">自动：人格里写了月薪就用人格；没写就按城市平均（一线 13000 / 新一线 10000 / 二线 7800 / 三线 6000）。</div>
+    </div>
+
+    <div class="card">
       <div class="card-title"><span>每月固定</span><span class="hint" id="fixedTotal">—</span></div>
       <ul class="list" id="fixed"></ul>
     </div>
@@ -53,6 +68,6 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.1.3"></script>
+  <script src="./app.js?v=1.2.0"></script>
 </body>
 </html>
