@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.2.2"
+PLUGIN_VERSION = "1.2.3"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -357,9 +357,50 @@ class AmoFinancePlugin(Star):
     def recent(self, limit: int = 5) -> list[dict[str, Any]]:
         return list(self._history[-max(1, int(limit)):])
 
+    #: 记住多少次幂等号（重启后同一笔不重复扣）。够覆盖「终端重启再重试」就行。
+    CHARGE_ID_KEEP = 300
+
+    def _replay_charge(self, request_id: str) -> dict[str, Any] | None:
+        """这个幂等号之前扣成功过吗？扣过就把原流水原样返回，不再动钱。"""
+        if not request_id:
+            return None
+        records = self._state.get("charge_ids")
+        if not isinstance(records, dict):
+            return None
+        entry = records.get(request_id)
+        if not isinstance(entry, dict):
+            return None
+        result = dict(entry.get("result") or {})
+        if not result.get("ok"):
+            return None
+        result["repeated"] = True
+        return result
+
+    def _remember_charge(self, request_id: str, result: dict[str, Any]) -> None:
+        """把成功的扣款记进账本状态（跟 book.json 一起落盘）。"""
+        if not request_id or not result.get("ok"):
+            return
+        records = self._state.get("charge_ids")
+        if not isinstance(records, dict):
+            records = {}
+            self._state["charge_ids"] = records
+        records[request_id] = {"ts": _now(), "result": dict(result)}
+        if len(records) > self.CHARGE_ID_KEEP:
+            oldest = sorted(records, key=lambda k: float((records.get(k) or {}).get("ts") or 0))
+            for key in oldest[: max(1, len(records) - self.CHARGE_ID_KEEP)]:
+                records.pop(key, None)
+
     def charge(self, amount: float, reason: str = "", payee: str = "",
-               from_savings: bool = False) -> dict[str, Any]:
-        """花钱。返回 {ok, balance, short?...}。失败不抛异常。"""
+               from_savings: bool = False, request_id: str = "") -> dict[str, Any]:
+        """花钱。返回 {ok, balance, short?...}。失败不抛异常。
+
+        ``request_id`` 幂等号：同一笔扣过就不扣第二次（终端重启也认）。
+        只记成功——失败单不锁死，补钱后还能重试。
+        """
+        rid = str(request_id or "").strip()
+        replay = self._replay_charge(rid)
+        if replay is not None:
+            return replay
         result = self._ledger.apply(
             amount, "expense", reason=reason, from_savings=from_savings
         )
@@ -368,7 +409,9 @@ class AmoFinancePlugin(Star):
                 "kind": "expense", "amount": round(float(amount), 2),
                 "reason": reason, "payee": payee,
                 "balance": result.get("balance"),
+                "request_id": rid,
             })
+            self._remember_charge(rid, result)
             self._save()
         else:
             # 扣款失败是要让人看见的
