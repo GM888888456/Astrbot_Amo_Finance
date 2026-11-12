@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import os
 import time
 from datetime import date, datetime
@@ -57,8 +58,15 @@ try:
 except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
+try:
+    from . import market as market_mod
+    from . import portfolio as pf
+except Exception:  # pragma: no cover - 直接以脚本方式加载时
+    import market as market_mod  # type: ignore
+    import portfolio as pf  # type: ignore
+
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.2.4"
+PLUGIN_VERSION = "1.3.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -100,6 +108,7 @@ class AmoFinancePlugin(Star):
         # 月结 / 固定支出的「上次执行」标记，防止重启重复扣
         self._state: dict[str, Any] = {}
         self._history: list[dict[str, Any]] = []
+        self._rng = random.Random()
         self._load()
         self.ensure_tick_task()
         self._register_web_apis()
@@ -352,6 +361,15 @@ class AmoFinancePlugin(Star):
         data["fixed_total"] = round(sum(item["amount"] for item in data["fixed"]), 2)
         data["anxiety"] = anxiety_from(self._ledger, data["fixed_total"])
         data["salary"] = self.salary_info()
+        try:
+            invest = self.invest_summary()
+        except Exception as exc:
+            logger.debug("[amo_fin] 投资快照失败: %s" % exc)
+            invest = {"positions": [], "count": 0, "total_value": 0,
+                      "total_cost": 0, "total_pnl": 0, "total_pnl_pct": 0,
+                      "day_pnl": 0, "equity": self._ledger.balance,
+                      "cash": self._ledger.balance}
+        data["invest"] = invest
         return data
 
     def recent(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -488,6 +506,222 @@ class AmoFinancePlugin(Star):
                 logger.warning("[amo_fin] 月度结算失败: %s" % exc)
             await asyncio.sleep(self.TICK_INTERVAL)
 
+    # ------------------------------------------------------------------
+    # 投资：模拟普通人炒股
+    # ------------------------------------------------------------------
+
+    def _fx(self) -> dict[str, float]:
+        return {
+            "CNY": 1.0,
+            "HKD": self._float("fx_hkd", 0.92),
+            "USD": self._float("fx_usd", 7.15),
+        }
+
+    def _watchlist(self) -> list[str]:
+        raw = self._cfg("invest_watchlist", list(pf.DEFAULT_WATCHLIST))
+        if isinstance(raw, str):
+            raw = [item for item in raw.replace("，", ",").split(",") if item.strip()]
+        out = []
+        for item in raw or []:
+            code = market_mod.normalize(str(item))
+            if code:
+                out.append(code)
+        return out or list(pf.DEFAULT_WATCHLIST)
+
+    def _board(self):
+        board = getattr(self, "_quote_board", None)
+        if board is None:
+            board = market_mod.QuoteBoard(ttl=float(self._int("invest_quote_ttl", 60)))
+            self._quote_board = board
+        return board
+
+    def _positions(self) -> dict[str, dict[str, Any]]:
+        invest = self._state.get("invest")
+        if not isinstance(invest, dict):
+            invest = {}
+            self._state["invest"] = invest
+        positions = invest.get("positions")
+        if not isinstance(positions, dict):
+            positions = {}
+            invest["positions"] = positions
+        return positions
+
+    def _invest_refresh(self, force: bool = False) -> None:
+        """刷新持仓的最新价；拿不到行情的股票保留上一次价格，不编。"""
+        positions = self._positions()
+        if not positions:
+            return
+        quotes = self._board().quotes(list(positions), force=force)
+        changed = False
+        for code, pos in positions.items():
+            data = quotes.get(code)
+            if not data:
+                continue
+            pos["name"] = data.get("name") or pos.get("name") or code
+            pos["last"] = data.get("price")
+            pos["prev_close"] = data.get("prev_close")
+            changed = True
+        if changed:
+            self._save()
+
+    def invest_summary(self, force: bool = False) -> dict[str, Any]:
+        self._invest_refresh(force=force)
+        summary = pf.summarize(self._positions(), self._fx())
+        equity = round(self._ledger.balance + summary["total_value"], 2)
+        summary["equity"] = equity
+        summary["cash"] = round(self._ledger.balance, 2)
+        return summary
+
+    def invest_buy(self, symbol: str, qty: int = 0, budget: float = 0.0) -> dict[str, Any]:
+        """买入。先看行情、再看钱、再落账——行情拿不到就明确失败。"""
+        code = market_mod.normalize(symbol)
+        if not code:
+            return {"ok": False, "reason": "认不出这只股票"}
+        quotes = self._board().quotes([code])
+        data = quotes.get(code)
+        if not data:
+            return {"ok": False, "reason": "行情拿不到，先不买"}
+        price = float(data["price"])
+        market = market_mod.market_of(code)
+        if budget and not qty:
+            qty = pf.qty_from_budget(float(budget), price, market)
+        try:
+            qty = int(qty)
+        except (TypeError, ValueError):
+            qty = 0
+        check = pf.can_buy(qty, price, self._ledger.balance, market)
+        if not check.get("ok"):
+            return check
+        # 单只不超过总资产三成：不许一把梭
+        summary = self.invest_summary()
+        equity = max(summary["equity"], 1.0)
+        holding = self._positions().get(code) or {}
+        rate = float(self._fx().get(str(holding.get("currency") or "CNY"), 1.0) or 1.0)
+        held_value = float(holding.get("qty") or 0) * float(holding.get("last") or price) * rate
+        after = held_value + check["cost"]
+        if after / equity > pf.MAX_WEIGHT + 0.001:
+            return {"ok": False, "reason": "这只占得太多了，别一把梭",
+                    "limit": round(equity * pf.MAX_WEIGHT, 2)}
+        result = self._ledger.apply(
+            check["cost"], "expense",
+            reason="买入 %s %d 股" % (data.get("name") or code, qty),
+        )
+        if not result.get("ok"):
+            return result
+        positions = self._positions()
+        pos = positions.get(code)
+        if pos is None:
+            pos = {"symbol": code, "name": data.get("name") or code,
+                   "qty": 0, "cost": 0.0, "last": price,
+                   "prev_close": data.get("prev_close"),
+                   "currency": data.get("currency") or "CNY"}
+            positions[code] = pos
+        pos["qty"] = int(pos.get("qty") or 0) + qty
+        pos["cost"] = round(float(pos.get("cost") or 0) + check["cost"], 2)
+        pos["last"] = price
+        pos["prev_close"] = data.get("prev_close")
+        self._state.setdefault("invest_history", []).append({
+            "action": "buy", "symbol": code, "name": data.get("name"),
+            "qty": qty, "price": price, "amount": check["cost"], "ts": _now(),
+        })
+        del self._state["invest_history"][:-200]
+        self._save()
+        self._report_to_companion()
+        return {"ok": True, "symbol": code, "name": data.get("name"), "qty": qty,
+                "price": price, "cost": check["cost"],
+                "balance": round(self._ledger.balance, 2)}
+
+    def invest_sell(self, symbol: str, qty: int = 0, all_out: bool = False) -> dict[str, Any]:
+        code = market_mod.normalize(symbol)
+        positions = self._positions()
+        pos = positions.get(code) if code else None
+        if not pos:
+            return {"ok": False, "reason": "没有这只"}
+        quotes = self._board().quotes([code])
+        data = quotes.get(code)
+        if not data:
+            return {"ok": False, "reason": "行情拿不到，先不卖"}
+        price = float(data["price"])
+        market = market_mod.market_of(code)
+        holding = int(pos.get("qty") or 0)
+        if all_out or not qty:
+            qty = holding
+        check = pf.can_sell(int(qty or 0), holding, price, market)
+        if not check.get("ok"):
+            return check
+        result = self._ledger.apply(
+            check["proceeds"], "income",
+            reason="卖出 %s %d 股" % (pos.get("name") or code, int(qty)),
+        )
+        if not result.get("ok"):
+            return result
+        qty = int(qty)
+        avg_cost = float(pos.get("cost") or 0) / holding if holding else 0.0
+        pos["qty"] = holding - qty
+        pos["cost"] = round(max(0.0, float(pos.get("cost") or 0) - avg_cost * qty), 2)
+        pos["last"] = price
+        pos["prev_close"] = data.get("prev_close")
+        if pos["qty"] <= 0:
+            positions.pop(code, None)
+        self._state.setdefault("invest_history", []).append({
+            "action": "sell", "symbol": code, "name": pos.get("name"),
+            "qty": qty, "price": price, "amount": check["proceeds"], "ts": _now(),
+        })
+        del self._state["invest_history"][:-200]
+        self._save()
+        self._report_to_companion()
+        return {"ok": True, "symbol": code, "name": pos.get("name"), "qty": qty,
+                "price": price, "proceeds": check["proceeds"],
+                "balance": round(self._ledger.balance, 2)}
+
+    def _invest_tick(self) -> None:
+        """收盘后（或插件定时器里）做两件事：刷新行情、按规则决定今天动不动手。"""
+        if not self._bool("invest_enable", True):
+            return
+        self._invest_refresh()
+        today = date.today().isoformat()
+        day = self._state.get("invest_day")
+        if not isinstance(day, dict) or day.get("date") != today:
+            # 记今天的开盘权益，用来算「今天赚了还是亏了」
+            equity = self._ledger.balance + pf.summarize(self._positions(), self._fx())["total_value"]
+            self._state["invest_day"] = {"date": today, "open": round(equity, 2)}
+            self._save()
+        if self._state.get("invest_auto_date") == today:
+            return
+        if not self._bool("invest_auto_trade", True):
+            return
+        self._state["invest_auto_date"] = today
+        self._save()
+        actions = pf.suggest_actions(
+            self._positions(), self._ledger.balance, self._watchlist(), self._fx(), self._rng,
+        )
+        for item in actions[:2]:
+            if item.get("action") == "sell":
+                result = self.invest_sell(item["symbol"], item.get("qty") or 0)
+            else:
+                result = self.invest_buy(item["symbol"], budget=item.get("budget") or 0)
+            if result.get("ok"):
+                logger.info("[amo_fin] 模拟交易：%s %s（%s）"
+                            % (item.get("action"), item.get("symbol"), item.get("why") or ""))
+
+    def mood_signal(self) -> dict[str, Any]:
+        """今天的盈亏，给终端拿去影响心情。"""
+        summary = self.invest_summary()
+        day = self._state.get("invest_day") or {}
+        base = float(day.get("open") or 0) if isinstance(day, dict) else 0.0
+        equity = summary["equity"]
+        day_pnl = round(equity - base, 2) if base else summary["day_pnl"]
+        pct = round(day_pnl / base * 100.0, 2) if base else 0.0
+        return {
+            "day_pnl": day_pnl,
+            "day_pnl_pct": pct,
+            "total_pnl": summary["total_pnl"],
+            "total_pnl_pct": summary["total_pnl_pct"],
+            "equity": equity,
+            "cash": summary["cash"],
+            "positions": summary["count"],
+        }
+
     def tick(self, now: datetime | None = None) -> dict[str, Any]:
         """检查该不该发工资 / 该不该交固定支出。幂等，重启不会重复扣。"""
         now = now or datetime.now()
@@ -534,6 +768,11 @@ class AmoFinancePlugin(Star):
             self._state["last_fixed_failed"] = failed
             actions.append("固定支出")
             self._save()
+
+        try:
+            self._invest_tick()
+        except Exception as exc:
+            logger.warning("[amo_fin] 投资结算失败: %s" % exc)
 
         return {"actions": actions, "today": today, "month": month}
 
@@ -672,6 +911,8 @@ class AmoFinancePlugin(Star):
             ("/status", self.api_status, ["GET"]),
             ("/health", self.api_health, ["GET"]),
             ("/salary", self.api_salary, ["POST"]),
+            ("/invest", self.api_invest, ["GET", "POST"]),
+            ("/invest/trade", self.api_invest_trade, ["POST"]),
             ("/history", self.api_history, ["GET"]),
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
@@ -736,6 +977,30 @@ class AmoFinancePlugin(Star):
             if not result.get("ok"):
                 return self._json({"code": 1, "message": result.get("reason") or "设置失败"})
         return self._json({"code": 0, "data": self.salary_info()})
+
+    async def api_invest(self):
+        """持仓与盈亏。带 ``refresh=1`` 会强制拉一次行情。"""
+        data = await self._payload()
+        force = bool(data.get("refresh"))
+        return self._json({"code": 0, "data": self.invest_summary(force=force)})
+
+    async def api_invest_trade(self):
+        """模拟买卖：{action: buy|sell, symbol, qty?, budget?, all_out?}"""
+        data = await self._payload()
+        action = str(data.get("action") or "").strip().lower()
+        symbol = str(data.get("symbol") or "").strip()
+        if action == "buy":
+            result = self.invest_buy(symbol, qty=data.get("qty") or 0,
+                                     budget=data.get("budget") or 0)
+        elif action == "sell":
+            result = self.invest_sell(symbol, qty=data.get("qty") or 0,
+                                      all_out=bool(data.get("all_out")))
+        else:
+            return self._fail("动作只能是 buy 或 sell")
+        if not result.get("ok"):
+            return self._json({"code": 1, "message": result.get("reason") or "没成交",
+                               "data": result})
+        return self._json({"code": 0, "data": result})
 
     async def api_history(self):
         return self._json({"code": 0, "data": {"items": self.recent(100)}})

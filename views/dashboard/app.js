@@ -64,6 +64,20 @@ async function loadStatus() {
   $("anxietyHint").textContent = a >= 0.7 ? "她现在有点为钱发愁（" + a.toFixed(2) + "）"
     : a >= 0.3 ? "还算稳（" + a.toFixed(2) + "）" : "没什么压力";
 
+  const inv = d.invest || {};
+  const pnl = Number(inv.total_pnl || 0);
+  const dayPnl = Number(inv.day_pnl || 0);
+  $("investValue").textContent = money(inv.total_value);
+  $("investPnl").textContent = (pnl >= 0 ? "+" : "") + money(pnl);
+  $("investDay").textContent = (dayPnl >= 0 ? "+" : "") + money(dayPnl);
+  $("investCash").textContent = money(inv.cash);
+  $("investPill").textContent = (inv.count || 0) + " 只持仓";
+  $("positions").innerHTML = (inv.positions || []).map((i) =>
+    '<li><span class="p">' + (i.name || i.symbol) + " · " + i.qty + " 股</span>" +
+    '<span class="s">' + money(i.market_value) + "（" +
+    (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>"
+  ).join("") || '<li class="empty">还没有持仓，等她自己去买，或者你手动下一单</li>';
+
   $("fixed").innerHTML = (d.fixed || []).map((i) =>
     '<li><span class="p">' + i.name + '</span><span class="s">' + money(i.amount) + "</span></li>"
   ).join("") || '<li class="empty">无</li>';
@@ -88,6 +102,22 @@ async function loadHistory() {
       sign + money(it.amount).slice(1) + "</span></li>";
   }).join("");
 }
+
+async function trade(action) {
+  const symbol = ($("tradeSymbol").value || "").trim();
+  const qty = Number($("tradeQty").value || 0);
+  if (!symbol) { $("tradeHint").textContent = "先填个代码"; return; }
+  const body = action === "buy"
+    ? { action: "buy", symbol: symbol, qty: qty || 0, budget: qty ? 0 : 5000 }
+    : { action: "sell", symbol: symbol, qty: qty || 0, all_out: !qty };
+  $("tradeHint").textContent = "下单中…";
+  const res = await post("invest/trade", body);
+  $("tradeHint").textContent = res ? "成交。" : "没成交（看看提示或余额）";
+  loadStatus();
+}
+
+$("buyBtn").addEventListener("click", () => trade("buy"));
+$("sellBtn").addEventListener("click", () => trade("sell"));
 
 $("saveSalary").addEventListener("click", async () => {
   const value = Number($("salaryInput").value || 0);

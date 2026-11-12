@@ -43,6 +43,27 @@
     </div>
 
     <div class="card">
+      <div class="card-title"><span>投资</span><span class="hint" id="investPill">—</span></div>
+      <dl class="kv">
+        <dt>总市值</dt><dd id="investValue">—</dd>
+        <dt>浮动盈亏</dt><dd id="investPnl">—</dd>
+        <dt>今日</dt><dd id="investDay">—</dd>
+        <dt>现金</dt><dd id="investCash">—</dd>
+      </dl>
+      <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
+      <div class="grid2">
+        <div class="field"><label>代码</label><input id="tradeSymbol" placeholder="600519 / 00700 / AAPL" /></div>
+        <div class="field"><label>股数</label><input id="tradeQty" type="number" min="0" step="100" placeholder="100" /></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="buyBtn">买入</button>
+        <button class="btn" id="sellBtn">卖出</button>
+        <span class="hint" id="tradeHint"></span>
+      </div>
+      <div class="meta">模拟盘：行情来自腾讯公开接口，买卖走同一个账本。她自己也会按「赚 8% 落袋、亏 10% 割肉」操作，可在配置里关掉。</div>
+    </div>
+
+    <div class="card">
       <div class="card-title"><span>每月固定</span><span class="hint" id="fixedTotal">—</span></div>
       <ul class="list" id="fixed"></ul>
     </div>
@@ -68,6 +89,6 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.2.4"></script>
+  <script src="./app.js?v=1.3.0"></script>
 </body>
 </html>

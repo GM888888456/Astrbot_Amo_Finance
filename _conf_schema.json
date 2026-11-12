@@ -11,6 +11,42 @@
     "default": 0,
     "hint": "填 0 就自动算：人格里写了「月薪/工资/薪资」就用那个数，没写按她所在城市的平均（一线 13000 / 新一线 10000 / 二线 7800 / 三线 6000）。填了数字就以这里为准。"
   },
+  "invest_enable": {
+    "type": "bool",
+    "description": "模拟炒股",
+    "default": true,
+    "hint": "用余额里的钱做模拟买卖（A 股 / 港股 / 美股，按腾讯公开行情）。不联网、不开户、不碰真钱。"
+  },
+  "invest_auto_trade": {
+    "type": "bool",
+    "description": "她自己会买卖",
+    "default": true,
+    "hint": "每天看一眼：赚 8% 落袋、亏 10% 割肉、有闲钱偶尔买一点。关掉就只能你在面板手动下单。"
+  },
+  "invest_watchlist": {
+    "type": "text",
+    "description": "自选股",
+    "default": "600519,300750,601318,000001,00700,AAPL",
+    "hint": "逗号分隔。A 股填 6 位代码，港股 5 位，美股字母。"
+  },
+  "invest_quote_ttl": {
+    "type": "int",
+    "description": "行情缓存秒数",
+    "default": 60,
+    "hint": "同一个代码多少秒内不重复请求，防止刷接口。"
+  },
+  "fx_hkd": {
+    "type": "float",
+    "description": "港币汇率（折人民币）",
+    "default": 0.92,
+    "hint": "只用于把港股资产折成人民币记账，不做交易。"
+  },
+  "fx_usd": {
+    "type": "float",
+    "description": "美元汇率（折人民币）",
+    "default": 7.15,
+    "hint": "只用于把美股资产折成人民币记账。"
+  },
   "pay_day": {
     "type": "int",
     "description": "每月几号发工资",
