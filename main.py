@@ -50,8 +50,13 @@ except Exception:  # pragma: no cover - 以脚本方式加载时
         DEFAULT_PRICES,
     )
 
+try:
+    from .link import probe as _link_probe, summary as _link_summary
+except Exception:  # pragma: no cover
+    from link import probe as _link_probe, summary as _link_summary  # type: ignore
+
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.0.1"
+PLUGIN_VERSION = "1.1.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -530,6 +535,7 @@ class AmoFinancePlugin(Star):
     def _register_web_apis(self) -> None:
         routes = [
             ("/status", self.api_status, ["GET"]),
+            ("/health", self.api_health, ["GET"]),
             ("/history", self.api_history, ["GET"]),
             ("/assets", self.api_assets, ["POST"]),
             ("/charge", self.api_charge, ["POST"]),
@@ -561,10 +567,15 @@ class AmoFinancePlugin(Star):
                 raw = None
         return raw if isinstance(raw, dict) else {}
 
+    async def api_health(self):
+        """我自己连没连上终端/记忆库。面板顶部那一行就看这个。"""
+        return self._json({"code": 0, "data": _link_probe(self)})
+
     async def api_status(self):
         snap = self.snapshot()
         return self._json({"code": 0, "data": {
             "name": PLUGIN_NAME, "version": PLUGIN_VERSION, "display_name": DISPLAY_NAME,
+            "link": _link_probe(self),
             "city": snap["city"], "city_level": snap["city_level"],
             "balance": snap["balance"], "savings": snap["savings"],
             "owed_to_user": snap["owed_to_user"],
