@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>我想永远陪着你-金融</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="dot"></span><span>我想永远陪着你 · 金融</span></div>
+    </header>
+
+    <div class="card">
+      <div class="card-title"><span>钱包</span><span class="pill" id="levelPill">—</span></div>
+      <dl class="kv">
+        <dt>余额</dt><dd id="balance">—</dd>
+        <dt>储蓄</dt><dd id="savings">—</dd>
+        <dt>欠你</dt><dd id="owed">—</dd>
+        <dt>本月花</dt><dd id="spent">—</dd>
+        <dt>本月进</dt><dd id="earned">—</dd>
+        <dt>城市</dt><dd id="city">—</dd>
+      </dl>
+      <div class="meta" id="anxietyHint"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>每月固定</span><span class="hint" id="fixedTotal">—</span></div>
+      <ul class="list" id="fixed"></ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>资产</span></div>
+      <label class="check"><input type="checkbox" id="own_house" /> 名下有房（不扣房租）</label>
+      <label class="check"><input type="checkbox" id="own_car" /> 名下有车（不扣车贷）</label>
+      <div class="grid2">
+        <div class="field"><label>房贷月供</label><input id="mortgage" type="number" min="0" /></div>
+        <div class="field"><label>车贷月供</label><input id="car_loan" type="number" min="0" /></div>
+      </div>
+      <div class="row">
+        <button class="btn" id="saveAssets">保存</button>
+        <span class="hint" id="assetsHint"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span>最近流水</span><span class="hint">正常交易不打日志</span></div>
+      <ul class="list" id="history"><li class="empty">加载中…</li></ul>
+    </div>
+
+    <div class="foot">反馈群 1055679275</div>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>

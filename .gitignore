@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+look_state.json

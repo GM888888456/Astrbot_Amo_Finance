@@ -1,0 +1,86 @@
+{
+  "enable": {
+    "type": "bool",
+    "description": "启用账本",
+    "default": true,
+    "hint": "关掉后终端不会扣钱，也不会记录任何流水。"
+  },
+  "salary": {
+    "type": "float",
+    "description": "月薪（税前）",
+    "default": 25000,
+    "hint": "高级架构师按新一线 25k。改这里会同时影响个税、五险一金、到手。"
+  },
+  "pay_day": {
+    "type": "int",
+    "description": "每月几号发工资",
+    "default": 10,
+    "hint": "1-28。发薪日当天自动入账，重启不会重复发。"
+  },
+  "city": {
+    "type": "string",
+    "description": "城市",
+    "default": "",
+    "hint": "留空 = 跟随天气插件里配置的城市。影响房租和日常消费的默认值。"
+  },
+  "initial_balance": {
+    "type": "float",
+    "description": "初始余额",
+    "default": 8000,
+    "hint": "只在第一次安装、账本还没有数据时生效。"
+  },
+  "initial_savings": {
+    "type": "float",
+    "description": "初始存款",
+    "default": 30000,
+    "hint": "同上，只初始化一次。"
+  },
+  "own_house": {
+    "type": "bool",
+    "description": "名下有房",
+    "default": false,
+    "hint": "打开后不再扣房租，但物业、水电、燃气照扣——房子是送的，住还是要花钱。"
+  },
+  "own_car": {
+    "type": "bool",
+    "description": "名下有车",
+    "default": false,
+    "hint": "打开后不再扣车贷，但车险、油费、停车照扣。"
+  },
+  "mortgage": {
+    "type": "float",
+    "description": "房贷月供",
+    "default": 0,
+    "hint": "0 = 没有房贷。有房且填了月供时按月扣。"
+  },
+  "car_loan": {
+    "type": "float",
+    "description": "车贷月供",
+    "default": 0,
+    "hint": "0 = 没有车贷。"
+  },
+  "auto_fixed_expense": {
+    "type": "bool",
+    "description": "每月自动交固定支出",
+    "default": true,
+    "hint": "每月 1 号扣房租/物业/水电/网费/话费。关掉就只记账不自动扣。"
+  },
+  "prices": {
+    "type": "object",
+    "description": "物价表",
+    "default": {},
+    "hint": "留空用内置价格。可覆盖单项，例如 {\"奶茶\": 22}。"
+  },
+  "daily_food_budget": {
+    "type": "float",
+    "description": "每日餐饮预算",
+    "default": 0,
+    "hint": "0 = 按城市档位自动（一线 110 / 新一线 90 / 二线 75）。"
+  },
+  "anxiety_threshold": {
+    "type": "float",
+    "description": "焦虑阈值",
+    "default": 0.5,
+    "hint": "余额撑不住固定支出的程度超过这个值，她会开始焦虑。0 = 总有安全感，1 = 只有快花光才焦虑。"
+  }
+}
