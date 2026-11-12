@@ -110,6 +110,32 @@ class InvestTests(unittest.TestCase):
         self.assertIn("day_pnl_pct", signal)
         self.assertLessEqual(abs(signal["day_pnl_pct"]), 100.0)
 
+    def test_first_run_buys_100_shares_once(self):
+        """第一次装好先买一手：她得先有股票，才谈得上知道股票这回事。"""
+        p = build(quotes={
+            "sh600519": quote("sh600519", "贵州茅台", 1000.0, 990.0),   # 一手 10 万，太贵
+            "sz000001": quote("sz000001", "平安银行", 10.0, 10.0),      # 一手 1000，买得起
+        })
+        p.config = {"invest_watchlist": "600519,000001"}
+        p._seed_invest_once()
+        self.assertTrue(p._state.get("invest_seeded"))
+        self.assertEqual(p._positions()["sz000001"]["qty"], 100)
+        self.assertNotIn("sh600519", p._positions(), "买不起一手就换下一只")
+
+    def test_first_run_does_not_repeat(self):
+        p = build(quotes={"sz000001": quote("sz000001", "平安银行", 10.0, 10.0)})
+        p.config = {"invest_watchlist": "000001"}
+        p._seed_invest_once()
+        balance = p._ledger.balance
+        p._seed_invest_once()
+        self.assertAlmostEqual(p._ledger.balance, balance, msg="只买一次")
+
+    def test_first_run_without_quote_retries_later(self):
+        p = build(quotes={})
+        p.config = {"invest_watchlist": "000001"}
+        p._seed_invest_once()
+        self.assertFalse(p._state.get("invest_seeded"), "行情拿不到就下次再试")
+
     def test_invest_tick_records_day_open(self):
         p = build()
         p._invest_tick()

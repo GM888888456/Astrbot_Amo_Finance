@@ -66,7 +66,7 @@ except Exception:  # pragma: no cover - 直接以脚本方式加载时
     import portfolio as pf  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.3.1"
+PLUGIN_VERSION = "1.4.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -499,6 +499,10 @@ class AmoFinancePlugin(Star):
     async def _tick_loop(self) -> None:
         # 先等 20 秒：终端在 on_astrbot_loaded 里推人格月薪，别抢在它前面按城市平均发一遍
         await asyncio.sleep(20)
+        try:
+            self._seed_invest_once()
+        except Exception as exc:
+            logger.warning("[amo_fin] 首次建仓失败: %s" % exc)
         while True:
             try:
                 self.tick()
@@ -673,6 +677,44 @@ class AmoFinancePlugin(Star):
         return {"ok": True, "symbol": code, "name": pos.get("name"), "qty": qty,
                 "price": price, "proceeds": check["proceeds"],
                 "balance": round(self._ledger.balance, 2)}
+
+    def _seed_invest_once(self) -> None:
+        """第一次装好：先买 100 股，让「我有股票」这件事真实发生。
+
+        用户不用替她买；她自己开户、自己下单。只买一手（100 股），且不超过总资产三成，
+        买不起就换下一只；都买不起或行情拿不到就下次再试。
+        """
+        if self._state.get("invest_seeded"):
+            return
+        if self._positions():
+            self._state["invest_seeded"] = True
+            self._save()
+            return
+        for code in self._watchlist():
+            quotes = self._board().quotes([code])
+            data = quotes.get(code)
+            if not data:
+                continue
+            price = float(data.get("price") or 0)
+            market = market_mod.market_of(code)
+            check = pf.can_buy(100, price, self._ledger.balance, market)
+            if not check.get("ok"):
+                continue
+            if check["cost"] > self._ledger.balance * pf.MAX_WEIGHT:
+                continue          # 一手就超过三成：这只太贵，换一只
+            result = self.invest_buy(code, qty=100)
+            if result.get("ok"):
+                self._state["invest_seeded"] = True
+                self._state["invest_seed_info"] = {
+                    "symbol": result.get("symbol"), "name": result.get("name"),
+                    "qty": result.get("qty"), "price": result.get("price"),
+                    "cost": result.get("cost"), "ts": _now(),
+                }
+                self._save()
+                logger.info("[amo_fin] 第一次装好，买了 100 股 %s（¥%.2f）"
+                            % (result.get("name"), float(result.get("cost") or 0)))
+                return
+        logger.info("[amo_fin] 这次没买成（行情或余额不够），下次再试")
 
     def _invest_tick(self) -> None:
         """收盘后（或插件定时器里）做两件事：刷新行情、按规则决定今天动不动手。"""
