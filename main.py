@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover
     from link import probe as _link_probe, summary as _link_summary  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.2.1"
+PLUGIN_VERSION = "1.2.2"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -436,6 +436,8 @@ class AmoFinancePlugin(Star):
             logger.debug("[amo_fin] 定时器启动失败: %s" % exc)
 
     async def _tick_loop(self) -> None:
+        # 先等 20 秒：终端在 on_astrbot_loaded 里推人格月薪，别抢在它前面按城市平均发一遍
+        await asyncio.sleep(20)
         while True:
             try:
                 self.tick()
