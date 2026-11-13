@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.1.4"
+PLUGIN_VERSION = "2.1.5"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -500,8 +500,14 @@ class AmoFinancePlugin(Star):
     #: 记住多少次幂等号（重启后同一笔不重复扣）。够覆盖「终端重启再重试」就行。
     CHARGE_ID_KEEP = 300
 
-    def _replay_charge(self, request_id: str) -> dict[str, Any] | None:
-        """这个幂等号之前扣成功过吗？扣过就把原流水原样返回，不再动钱。"""
+    def _replay_charge(self, request_id: str, amount=None, reason=None,
+                       payee=None) -> dict[str, Any] | None:
+        """这个幂等号之前扣成功过吗？扣过就把原流水原样返回，不再动钱。
+
+        同一个幂等号必须是**同一笔账**：金额/理由/收款方对不上，说明调用方拿错了号，
+        这时返回 ``idempotency_conflict``，绝不能把旧流水静默当成这笔的结果
+        （否则旅游那笔能和医疗扣款撞号，账就乱了）。
+        """
         if not request_id:
             return None
         records = self._state.get("charge_ids")
@@ -513,18 +519,49 @@ class AmoFinancePlugin(Star):
         result = dict(entry.get("result") or {})
         if not result.get("ok"):
             return None
+
+        def conflict(reason_text: str) -> dict[str, Any]:
+            return {"ok": False, "code": "idempotency_conflict", "replayed": True,
+                    "request_id": request_id, "reason": reason_text,
+                    "balance": self._ledger.balance}
+
+        stored_amount = entry.get("amount")
+        if amount is not None and stored_amount is not None:
+            try:
+                if abs(round(float(stored_amount), 2) - round(float(amount), 2)) > 0.005:
+                    return conflict("同一幂等号的金额不一致（原来 %.2f，这次 %.2f）"
+                                    % (float(stored_amount), float(amount)))
+            except (TypeError, ValueError):
+                pass
+        for label, stored_key, given in (("理由", "reason", reason),
+                                         ("收款方", "payee", payee)):
+            stored_text = str(entry.get(stored_key) or "").strip()
+            given_text = str(given or "").strip()
+            if stored_text and given_text and stored_text != given_text:
+                return conflict("同一幂等号的%s不一致（原来「%s」，这次「%s」）"
+                                % (label, stored_text, given_text))
         result["repeated"] = True
         return result
 
-    def _remember_charge(self, request_id: str, result: dict[str, Any]) -> None:
-        """把成功的扣款记进账本状态（跟 book.json 一起落盘）。"""
+    def _remember_charge(self, request_id: str, result: dict[str, Any],
+                         amount=None, reason: str = "", payee: str = "") -> None:
+        """把成功的扣款记进账本状态（跟 book.json 一起落盘）。
+
+        金额/理由/收款方一起存：下次同号重放时才知道是不是同一笔账。
+        """
         if not request_id or not result.get("ok"):
             return
         records = self._state.get("charge_ids")
         if not isinstance(records, dict):
             records = {}
             self._state["charge_ids"] = records
-        records[request_id] = {"ts": _now(), "result": dict(result)}
+        try:
+            stored_amount = round(float(amount), 2) if amount is not None else None
+        except (TypeError, ValueError):
+            stored_amount = None
+        records[request_id] = {"ts": _now(), "amount": stored_amount,
+                               "reason": str(reason or ""), "payee": str(payee or ""),
+                               "result": dict(result)}
         if len(records) > self.CHARGE_ID_KEEP:
             oldest = sorted(records, key=lambda k: float((records.get(k) or {}).get("ts") or 0))
             for key in oldest[: max(1, len(records) - self.CHARGE_ID_KEEP)]:
@@ -538,7 +575,7 @@ class AmoFinancePlugin(Star):
         只记成功——失败单不锁死，补钱后还能重试。
         """
         rid = str(request_id or "").strip()
-        replay = self._replay_charge(rid)
+        replay = self._replay_charge(rid, amount=amount, reason=reason, payee=payee)
         if replay is not None:
             return replay
         result = self._ledger.apply(
@@ -551,7 +588,7 @@ class AmoFinancePlugin(Star):
                 "balance": result.get("balance"),
                 "request_id": rid,
             })
-            self._remember_charge(rid, result)
+            self._remember_charge(rid, result, amount=amount, reason=reason, payee=payee)
             self._save()
         else:
             # 扣款失败是要让人看见的

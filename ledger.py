@@ -277,7 +277,9 @@ def monthly_fixed(ledger: Ledger, prices: dict[str, float], city: str = "") -> l
     profile = city_profile(city)
     items: list[dict[str, Any]] = []
 
-    if not ledger.own_house and ledger.mortgage > 0:
+    # 房贷和房租是两件事：背着房贷（不管房子写没写自己名下）就得按月还；
+    # 只有既没房贷又没房才交房租。以前「有房」会把房贷整个吞掉。
+    if ledger.mortgage > 0:
         items.append({"name": "房贷", "amount": ledger.mortgage, "tier": "core"})
     elif not ledger.own_house:
         items.append({"name": "房租", "amount": float(profile["rent"]), "tier": "core"})

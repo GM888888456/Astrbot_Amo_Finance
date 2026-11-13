@@ -172,6 +172,13 @@ class FixedExpenseTests(unittest.TestCase):
         self.assertIn("物业", names)
         self.assertIn("水电", names)
 
+    def test_own_house_with_mortgage_still_pays_mortgage(self):
+        """有房但还在还房贷：房贷不能因为「有房」被吞掉。"""
+        items = monthly_fixed(Ledger(own_house=True, mortgage=6000), {}, city="杭州")
+        names = [i["name"] for i in items]
+        self.assertIn("房贷", names)
+        self.assertNotIn("房租", names)
+
     def test_car_owner_pays_running_cost_not_loan(self):
         items = monthly_fixed(Ledger(own_car=True), {}, city="杭州")
         names = [i["name"] for i in items]

@@ -44,6 +44,37 @@ class ChargeIdempotencyTests(unittest.TestCase):
         self.assertAlmostEqual(p._ledger.balance, 800.0)
         self.assertEqual(len(p._history), 1, "重复的号不该再记一条流水")
 
+    def test_same_id_different_amount_is_a_conflict(self):
+        """同一个幂等号换了金额＝调用方拿错号，绝不能当同一笔账静默复用。"""
+        p = build()
+        p.charge(200, "看病", "医院", request_id="med-x")
+        conflict = p.charge(999, "看病", "医院", request_id="med-x")
+        self.assertFalse(conflict["ok"])
+        self.assertEqual(conflict["code"], "idempotency_conflict")
+        self.assertAlmostEqual(p._ledger.balance, 800.0, msg="冲突时不许动钱")
+        self.assertEqual(len(p._history), 1, "冲突不该多记一条流水")
+
+    def test_same_id_different_reason_is_a_conflict(self):
+        p = build()
+        p.charge(200, "看病", "医院", request_id="med-y")
+        conflict = p.charge(200, "旅游", "医院", request_id="med-y")
+        self.assertEqual(conflict["code"], "idempotency_conflict")
+        self.assertAlmostEqual(p._ledger.balance, 800.0)
+
+    def test_same_id_different_payee_is_a_conflict(self):
+        p = build()
+        p.charge(200, "看病", "医院", request_id="med-z")
+        conflict = p.charge(200, "看病", "药店", request_id="med-z")
+        self.assertEqual(conflict["code"], "idempotency_conflict")
+
+    def test_legacy_record_without_amount_still_replays(self):
+        """老账本只有 ts+result：没有金额可比，照旧按重复返回，不误报冲突。"""
+        p = build(state={"charge_ids": {"old-1": {
+            "ts": 1.0, "result": {"ok": True, "balance": 900.0}}}})
+        replay = p.charge(200, "看病", "医院", request_id="old-1")
+        self.assertTrue(replay.get("repeated"))
+        self.assertAlmostEqual(p._ledger.balance, 1000.0)
+
     def test_different_request_id_charges_twice(self):
         p = build()
         p.charge(200, "看病", "医院", request_id="med-1")
