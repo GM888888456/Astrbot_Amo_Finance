@@ -17,11 +17,13 @@
     </header>
 <div id="linkbar" style="margin:8px 0 4px;padding:8px 10px;border-radius:10px;background:rgba(128,128,128,.10);font-size:12px;line-height:1.6">连接状态：检查中…</div>
 
+    <!-- 资产 / 房车 / 投资 / 每月固定：一个卡，横线分隔 -->
     <div class="card">
-      <div class="card-title"><span>资产</span></div>
+      <div class="card-title"><span>资产</span><span class="pill" id="levelPill">—</span></div>
+
       <div class="split">
         <div class="col">
-          <div class="sub-title">钱包 <span class="pill" id="levelPill">—</span></div>
+          <div class="sub-title">钱包</div>
           <dl class="kv">
             <dt>余额</dt><dd id="balance">—</dd>
             <dt>储蓄</dt><dd id="savings">—</dd>
@@ -39,16 +41,28 @@
             <dt>到手</dt><dd id="salaryNet">—</dd>
             <dt>发薪日</dt><dd id="salaryDay">—</dd>
           </dl>
-          <div class="meta">自动：人格里有就用，没有按城市平均。</div>
         </div>
       </div>
-      <div class="meta" id="anxietyHint"></div>
-      <div class="hint" id="borrowHint">—</div>
-      <div class="meta">本行不提供贷款：你转给她的都算借款，她还你时记还款；借款不收利息，储蓄才有利息。</div>
-    </div>
+      <div class="meta">自动：人格里有就用，没有按城市平均。</div>
 
-    <div class="card">
-      <div class="card-title"><span>投资</span><span class="hint" id="investPill">—</span></div>
+      <!-- 名下有房/有车：全款才勾；不勾就按工资自动租房或贷款 -->
+      <div class="ownrow">
+        <label class="check"><input type="checkbox" id="own_house" /> 名下有房（全款）</label>
+        <label class="check"><input type="checkbox" id="own_car" /> 名下有车（全款）</label>
+      </div>
+      <div class="meta">不勾就按工资和城市自动安排：够供 → 贷款（贷），不够 → 租（租）。月供和租金自动算，不用填。</div>
+
+      <div class="sep"></div>
+      <div class="sub-title">房 · 车</div>
+      <dl class="kv">
+        <dt>房子</dt><dd id="houseDesc">—</dd>
+        <dt id="housePayLabel">月供</dt><dd id="housePay">—</dd>
+        <dt>车</dt><dd id="carDesc">—</dd>
+        <dt id="carPayLabel">月供</dt><dd id="carPay">—</dd>
+      </dl>
+
+      <div class="sep"></div>
+      <div class="sub-title">投资 <span class="hint" id="investPill">—</span></div>
       <dl class="kv">
         <dt>总市值</dt><dd id="investValue">—</dd>
         <dt>浮动盈亏</dt><dd id="investPnl">—</dd>
@@ -57,28 +71,14 @@
       </dl>
       <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
       <div class="meta" id="investMeta">模拟盘：行情来自腾讯公开接口。买卖是她自己的事，这里只看不管；成交会记进下面的流水。没钱了她会自己开口借。</div>
-    </div>
 
-    <div class="card">
-      <div class="card-title"><span>每月固定</span><span class="hint" id="fixedTotal">—</span></div>
+      <div class="sep"></div>
+      <div class="sub-title">每月固定 <span class="hint" id="fixedTotal">—</span></div>
       <ul class="list" id="fixed"></ul>
-    </div>
 
-    <div class="card">
-      <div class="card-title"><span>房车</span></div>
-      <div class="grid2">
-        <div class="field">
-          <label class="check"><input type="checkbox" id="own_house" /> 名下有房</label>
-          <input id="mortgage" type="number" min="0" placeholder="房贷月供" />
-          <span class="hint">有房不扣房租，房贷照扣</span>
-        </div>
-        <div class="field">
-          <label class="check"><input type="checkbox" id="own_car" /> 名下有车</label>
-          <input id="car_loan" type="number" min="0" placeholder="车贷月供" />
-          <span class="hint">有车不扣车贷，车险油费照扣</span>
-        </div>
-      </div>
-      <span class="hint" id="assetsHint">改完点右上角「保存」。</span>
+      <div class="meta" id="anxietyHint"></div>
+      <div class="hint" id="borrowHint">—</div>
+      <div class="meta" id="assetsHint">房车和工资都可以在这里改，改完点右上角「保存」。</div>
     </div>
 
     <div class="card">
@@ -114,10 +114,8 @@
             </dl>
           </div>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><span>投资</span></div>
+        <div class="sep"></div>
+        <div class="sub-title">投资</div>
         <dl class="kv">
           <dt>总市值</dt><dd id="subInvestValue">—</dd>
           <dt>浮动盈亏</dt><dd id="subInvestPnl">—</dd>
@@ -135,6 +133,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=2.0.0"></script>
+  <script src="./app.js?v=2.1.0"></script>
 </body>
 </html>

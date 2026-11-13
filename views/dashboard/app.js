@@ -64,7 +64,27 @@ async function loadStatus() {
   $("salaryNet").textContent = money(pay.net);
   $("salaryDay").textContent = pay.pay_day ? ("每月 " + pay.pay_day + " 号") : "—";
   $("salarySource").textContent = pay.source || "—";
-  $("levelPill").textContent = d.own_house ? "有房" : "租房";
+  const houseKind = String(d.house_kind || "");
+  const kindText = { own: "全款房", loan: "贷款房", rent: "租房" }[houseKind] || (d.own_house ? "全款房" : "租房");
+  $("levelPill").textContent = kindText;
+  const houseDesc = $("houseDesc");
+  if (houseDesc) houseDesc.textContent = d.house_desc || "—";
+  const housePay = $("housePay");
+  if (housePay) {
+    const isRent = houseKind === "rent";
+    if ($("housePayLabel")) $("housePayLabel").textContent = isRent ? "月租" : "月供";
+    const value = isRent ? Number(d.house_rent || 0) : Number(d.mortgage || 0);
+    housePay.textContent = value > 0 ? money(value) + "/月" : "无";
+  }
+  const carDesc = $("carDesc");
+  if (carDesc) carDesc.textContent = d.car_desc || "—";
+  const carPay = $("carPay");
+  if (carPay) {
+    const isCarRent = String(d.car_kind || "") === "rent";
+    if ($("carPayLabel")) $("carPayLabel").textContent = isCarRent ? "月租" : "月供";
+    const value = isCarRent ? Number(d.car_rent || 0) : Number(d.car_loan || 0);
+    carPay.textContent = value > 0 ? money(value) + "/月" : "无";
+  }
   $("fixedTotal").textContent = money(d.fixed_total) + "/月";
   const a = Number(d.anxiety || 0);
   $("anxietyHint").textContent = a >= 0.7 ? "她现在有点为钱发愁（" + a.toFixed(2) + "）"
@@ -106,8 +126,6 @@ async function loadStatus() {
 
   $("own_house").checked = !!d.own_house;
   $("own_car").checked = !!d.own_car;
-  $("mortgage").value = d.mortgage != null ? d.mortgage : "";
-  $("car_loan").value = d.car_loan != null ? d.car_loan : "";
 }
 
 async function loadHistory() {
@@ -182,8 +200,6 @@ $("saveAssets").addEventListener("click", async () => {
   const body = {
     own_house: $("own_house").checked,
     own_car: $("own_car").checked,
-    mortgage: Number($("mortgage").value || 0),
-    car_loan: Number($("car_loan").value || 0),
   };
   const res = await post("assets", body);
   $("assetsHint").textContent = res ? "已保存。" : "保存失败。";

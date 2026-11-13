@@ -83,18 +83,6 @@
     "default": false,
     "hint": "打开后不再扣车贷，但车险、油费、停车照扣。"
   },
-  "mortgage": {
-    "type": "float",
-    "description": "房贷月供",
-    "default": 0,
-    "hint": "0 = 没有房贷。有房且填了月供时按月扣。"
-  },
-  "car_loan": {
-    "type": "float",
-    "description": "车贷月供",
-    "default": 0,
-    "hint": "0 = 没有车贷。"
-  },
   "auto_fixed_expense": {
     "type": "bool",
     "description": "每月自动交固定支出",

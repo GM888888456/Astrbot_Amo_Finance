@@ -38,6 +38,7 @@ try:
         city_level,
         city_profile,
         monthly_fixed,
+        plan_assets,
         payroll,
         DEFAULT_PRICES,
     )
@@ -49,6 +50,7 @@ except Exception:  # pragma: no cover - 以脚本方式加载时
         city_level,
         city_profile,
         monthly_fixed,
+        plan_assets,
         payroll,
         DEFAULT_PRICES,
     )
@@ -71,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.1.5"
+PLUGIN_VERSION = "2.2.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -285,6 +287,13 @@ class AmoFinancePlugin(Star):
             owed_to_user=float(led.get("owed_to_user") or 0.0),
             month_spent=float(led.get("month_spent") or 0.0),
             month_income=float(led.get("month_income") or 0.0),
+            house_kind=str(led.get("house_kind") or ""),
+            house_desc=str(led.get("house_desc") or ""),
+            house_rent=float(led.get("house_rent") or 0.0),
+            car_kind=str(led.get("car_kind") or ""),
+            car_desc=str(led.get("car_desc") or ""),
+            car_rent=float(led.get("car_rent") or 0.0),
+            asset_seed=str(led.get("asset_seed") or ""),
         )
         self._state = data.get("state") if isinstance(data.get("state"), dict) else {}
         history = data.get("history")
@@ -311,6 +320,15 @@ class AmoFinancePlugin(Star):
             self._log({"kind": "init", "amount": self._ledger.balance,
                        "reason": "初始化", "balance": self._ledger.balance})
             self._save()
+        # 房车没规划过就按工资 + 城市自动安排（老账本也会补上）
+        if not str(self._ledger.house_desc or "").strip():
+            try:
+                plan_assets(self._ledger, self._city(), self._salary_net())
+                self._save()
+                logger.info("[amo_fin] 房车自动安排：%s｜%s",
+                            self._ledger.house_desc, self._ledger.car_desc)
+            except Exception as exc:
+                logger.warning("[amo_fin] 房车自动安排失败: %s" % exc)
 
     def _backfill_history_reasons(self) -> bool:
         """老流水里 borrow/transfer_in 没写原因：补成中文，面板不再显示英文 kind。"""
@@ -378,6 +396,13 @@ class AmoFinancePlugin(Star):
                 "owed_to_user": self._ledger.owed_to_user,
                 "month_spent": self._ledger.month_spent,
                 "month_income": self._ledger.month_income,
+                "house_kind": self._ledger.house_kind,
+                "house_desc": self._ledger.house_desc,
+                "house_rent": self._ledger.house_rent,
+                "car_kind": self._ledger.car_kind,
+                "car_desc": self._ledger.car_desc,
+                "car_rent": self._ledger.car_rent,
+                "asset_seed": self._ledger.asset_seed,
             },
             "state": self._state,
             "history": self._history[-HISTORY_LIMIT:],
@@ -407,6 +432,17 @@ class AmoFinancePlugin(Star):
     # ------------------------------------------------------------------
     # 薪资：人格里写了就用人格的，没写按城市平均
     # ------------------------------------------------------------------
+
+    def _salary_net(self) -> float:
+        """到手月薪：房车规划按到手算，别拿税前虚高。"""
+        try:
+            info = self.salary_info() or {}
+            value = info.get("net")
+            if value is None:
+                value = info.get("gross") or 0
+            return float(value or 0.0)
+        except Exception:
+            return 0.0
 
     def salary_info(self) -> dict[str, Any]:
         """这个月拿多少、哪来的、到手多少。
@@ -1941,6 +1977,10 @@ class AmoFinancePlugin(Star):
             "fixed": snap["fixed"], "fixed_total": snap["fixed_total"],
             "anxiety": snap["anxiety"], "own_house": snap["own_house"],
             "own_car": snap["own_car"],
+            "house_kind": snap.get("house_kind"), "house_desc": snap.get("house_desc"),
+            "house_rent": snap.get("house_rent"), "mortgage": snap.get("mortgage"),
+            "car_kind": snap.get("car_kind"), "car_desc": snap.get("car_desc"),
+            "car_rent": snap.get("car_rent"), "car_loan": snap.get("car_loan"),
             "salary": snap.get("salary") or self.salary_info(),
             "invest": snap.get("invest") or {},
             "borrow": snap.get("borrow") or self.borrow_info(),
@@ -1981,13 +2021,17 @@ class AmoFinancePlugin(Star):
             self._ledger.own_house = bool(data["own_house"])
         if "own_car" in data:
             self._ledger.own_car = bool(data["own_car"])
-        for key, attr in (("mortgage", "mortgage"), ("car_loan", "car_loan"),
-                          ("savings", "savings")):
-            if key in data:
-                try:
-                    setattr(self._ledger, attr, round(float(data[key]), 2))
-                except Exception:
-                    continue
+        # 月供/租金不再由面板填写：按工资+城市自动规划（全款=自，没勾=租/贷）
+        if "savings" in data:
+            try:
+                self._ledger.savings = round(float(data["savings"]), 2)
+            except Exception:
+                pass
+        try:
+            plan_assets(self._ledger, self._city(), self._salary_net(),
+                        force=("own_house" in data or "own_car" in data))
+        except Exception as exc:
+            logger.debug("[amo_fin] 房车重新规划失败: %s" % exc)
         self._save()
         self._report_to_companion()
         snap = await asyncio.to_thread(self.snapshot)

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -155,6 +156,15 @@ class Ledger:
     #: 月供（有贷款时才有意义）
     mortgage: float = 0.0
     car_loan: float = 0.0
+    #: 房/车的自动规划结果：own / rent / loan + 描述 + 每月金额
+    house_kind: str = ""
+    house_desc: str = ""
+    house_rent: float = 0.0
+    car_kind: str = ""
+    car_desc: str = ""
+    car_rent: float = 0.0
+    #: 第一次规划的随机种子：定下来就不再换房换车
+    asset_seed: str = ""
     #: 医保个人账户余额
     medical_account: float = 0.0
     #: 累计借用户的钱（她记着的账）
@@ -175,6 +185,12 @@ class Ledger:
             "own_car": bool(self.own_car),
             "mortgage": round(self.mortgage, 2),
             "car_loan": round(self.car_loan, 2),
+            "house_kind": str(self.house_kind or ""),
+            "house_desc": str(self.house_desc or ""),
+            "house_rent": round(self.house_rent, 2),
+            "car_kind": str(self.car_kind or ""),
+            "car_desc": str(self.car_desc or ""),
+            "car_rent": round(self.car_rent, 2),
             "month_spent": round(self.month_spent, 2),
             "month_income": round(self.month_income, 2),
             "total": round(self.balance + self.savings, 2),
@@ -272,15 +288,124 @@ class Ledger:
 # ---------------------------------------------------------------------------
 
 
+#: 房/车的取名池：同一个 seed 永远得到同一套，不会今天住这明天住那
+HOUSE_POOL = ("花果园", "云岩小区", "金阳新苑", "南明雅苑", "观山湖公馆", "小车河畔")
+HOUSE_PHASES = ("一期", "二期", "三期")
+HOUSE_LAYOUTS = ("一室一厅", "两室一厅", "三室一厅", "三室两厅")
+CAR_POOL = (("大众", "速腾"), ("丰田", "卡罗拉"), ("本田", "思域"),
+            ("比亚迪", "秦PLUS"), ("吉利", "星瑞"), ("日产", "轩逸"))
+#: 车的落地价基准（元）
+CAR_PRICE = 128000.0
+
+
+def monthly_loan(principal: float, annual_rate: float = 0.041, months: int = 360) -> float:
+    """等额本息月供。principal<=0 返回 0。"""
+    try:
+        principal = float(principal)
+    except (TypeError, ValueError):
+        return 0.0
+    if principal <= 0 or months <= 0:
+        return 0.0
+    rate = float(annual_rate) / 12.0
+    if rate <= 0:
+        return round(principal / months, 2)
+    return round(principal * rate / (1 - (1 + rate) ** (-months)), 2)
+
+
+def plan_assets(ledger: Ledger, city: str = "", salary: float = 0.0,
+                force: bool = False) -> dict[str, Any]:
+    """按工资和城市基准自动安排房和车，算出房租/月供。
+
+    规则（用户定的）：
+    - ``own_house/own_car`` = 全款：不扣房贷/房租，描述后缀「自」；
+    - 没勾：工资够 → 贷款买，后缀「贷」，月供按房价七成、30 年、4.1% 算；
+      工资不够 → 租，后缀「租」，租金按当地基准。
+    结果写回 ledger，并返回本次规划（方便面板显示）。
+    """
+    profile = city_profile(city)
+    rent_base = float(profile.get("rent") or 2000.0)
+    house_price = round(rent_base * 260.0, 2)      # 房价按「20 年租金」估
+    try:
+        salary = float(salary or 0.0)
+    except (TypeError, ValueError):
+        salary = 0.0
+
+    if not ledger.asset_seed:
+        # 种子里带一点不可预测性：第一次定下来就固定，之后不再换房换车
+        ledger.asset_seed = "%s|%.0f|%d" % (str(city or ""), salary, int(rent_base * 37))
+    seed = str(ledger.asset_seed)
+    chooser = random.Random("amo-assets:" + seed)
+
+    house = chooser.choice(HOUSE_POOL)
+    phase = chooser.choice(HOUSE_PHASES)
+    room = "%d%02d" % (chooser.randint(3, 18), chooser.randint(1, 28))
+    layout = chooser.choice(HOUSE_LAYOUTS)
+
+    if ledger.own_house or (ledger.house_kind == "own" and not force):
+        ledger.house_kind = "own"
+        ledger.mortgage = 0.0
+        ledger.house_rent = 0.0
+        suffix = "自"
+    elif ledger.house_kind == "loan" and not force:
+        suffix = "贷"
+    elif ledger.house_kind == "rent" and not force:
+        suffix = "租"
+    elif salary >= 12000 and (not force or ledger.mortgage > 0 or ledger.house_kind == "loan"):
+        # 工资够：贷款买（首付三成、30 年）
+        ledger.house_kind = "loan"
+        ledger.mortgage = monthly_loan(house_price * 0.7)
+        ledger.house_rent = 0.0
+        suffix = "贷"
+    elif salary >= 12000:
+        ledger.house_kind = "loan"
+        ledger.mortgage = monthly_loan(house_price * 0.7)
+        ledger.house_rent = 0.0
+        suffix = "贷"
+    else:
+        ledger.house_kind = "rent"
+        ledger.mortgage = 0.0
+        ledger.house_rent = round(rent_base, 2)
+        suffix = "租"
+    ledger.house_desc = "%s·%s·%s·%s·%s" % (house, phase, room, layout, suffix)
+
+    brand, model = chooser.choice(CAR_POOL)
+    if ledger.own_car:
+        ledger.car_kind = "own"
+        ledger.car_loan = 0.0
+        ledger.car_rent = 0.0
+        car_suffix = "自"
+    elif salary >= 9000:
+        ledger.car_kind = "loan"
+        ledger.car_loan = monthly_loan(CAR_PRICE * 0.7, annual_rate=0.045, months=60)
+        ledger.car_rent = 0.0
+        car_suffix = "贷"
+    else:
+        ledger.car_kind = "rent"
+        ledger.car_loan = 0.0
+        ledger.car_rent = 2600.0
+        car_suffix = "租"
+    ledger.car_desc = "%s·%s·%s" % (brand, model, car_suffix)
+
+    return {
+        "house_desc": ledger.house_desc, "house_kind": ledger.house_kind,
+        "house_rent": ledger.house_rent, "mortgage": ledger.mortgage,
+        "car_desc": ledger.car_desc, "car_kind": ledger.car_kind,
+        "car_rent": ledger.car_rent, "car_loan": ledger.car_loan,
+        "house_price": house_price,
+    }
+
+
 def monthly_fixed(ledger: Ledger, prices: dict[str, float], city: str = "") -> list[dict[str, Any]]:
     """这个月必须交的钱。有房有车的项自动消失或减少。"""
     profile = city_profile(city)
     items: list[dict[str, Any]] = []
 
-    # 房贷和房租是两件事：背着房贷（不管房子写没写自己名下）就得按月还；
-    # 只有既没房贷又没房才交房租。以前「有房」会把房贷整个吞掉。
+    # 房贷和房租是两件事：背着房贷就得按月还；没房贷才看房租。
+    # 房租金额用规划出来的（按城市基准），不再让用户在面板上手填。
     if ledger.mortgage > 0:
         items.append({"name": "房贷", "amount": ledger.mortgage, "tier": "core"})
+    elif ledger.house_rent > 0:
+        items.append({"name": "房租", "amount": ledger.house_rent, "tier": "core"})
     elif not ledger.own_house:
         items.append({"name": "房租", "amount": float(profile["rent"]), "tier": "core"})
 
@@ -291,13 +416,18 @@ def monthly_fixed(ledger: Ledger, prices: dict[str, float], city: str = "") -> l
     items.append({"name": "网费", "amount": float(prices.get("网费", 100)), "tier": "core"})
     items.append({"name": "话费", "amount": float(prices.get("话费", 50)), "tier": "core"})
 
-    if ledger.own_car:
-        # 有车不扣车贷，但保险油钱停车保养照旧
+    if ledger.car_loan > 0:
+        items.append({"name": "车贷", "amount": ledger.car_loan, "tier": "core"})
+        items.append({"name": "油费", "amount": 620.0, "tier": "event"})
+        items.append({"name": "停车", "amount": 300.0, "tier": "event"})
+    elif ledger.car_rent > 0:
+        items.append({"name": "租车", "amount": ledger.car_rent, "tier": "core"})
+        items.append({"name": "油费", "amount": 420.0, "tier": "event"})
+    elif ledger.own_car:
+        # 全款车不扣车贷，但保险油钱停车照旧
         items.append({"name": "车险", "amount": 420.0, "tier": "core"})
         items.append({"name": "油费", "amount": 620.0, "tier": "event"})
         items.append({"name": "停车", "amount": 300.0, "tier": "event"})
-    elif ledger.car_loan > 0:
-        items.append({"name": "车贷", "amount": ledger.car_loan, "tier": "core"})
 
     return items
 
