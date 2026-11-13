@@ -93,11 +93,16 @@ async function loadStatus() {
   $("investDay").textContent = (dayPnl >= 0 ? "+" : "") + money(dayPnl);
   $("investCash").textContent = money(inv.cash);
   $("investPill").textContent = (inv.aggressive ? "FX 战士 · " : "") + (inv.count || 0) + " 只持仓";
-  $("positions").innerHTML = (inv.positions || []).map((i) =>
-    '<li><span class="p">' + (i.name || i.symbol) + " · " + i.qty + " 股</span>" +
-    '<span class="s">' + money(i.market_value) + "（" +
-    (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>"
-  ).join("") || '<li class="empty">还没有持仓，等她自己去买</li>';
+  const CUR = { CNY: "¥", USD: "$", HKD: "HK$" };
+  $("positions").innerHTML = (inv.positions || []).map((i) => {
+    const cur = CUR[i.currency] || "¥";
+    const native = (i.currency && i.currency !== "CNY")
+      ? " · " + cur + Number(i.last || 0).toFixed(2)
+      : "";
+    return '<li><span class="p">' + (i.name || i.symbol) + " · " + i.qty + " 股" + native + "</span>" +
+      '<span class="s">' + money(i.market_value) + "（" +
+      (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>";
+  }).join("") || '<li class="empty">还没有持仓，等她自己去买</li>';
 
   const bk = inv.bankrupt || {};
   const bkText = BANKRUPT_TEXT[bk.level] || "";
