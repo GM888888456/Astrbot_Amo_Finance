@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.2.7"
+PLUGIN_VERSION = "2.2.8"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -452,13 +452,26 @@ class AmoFinancePlugin(Star):
         # 股票动作留一份给终端：她得知道自己为什么买/卖
         kind = str(entry.get("kind") or "")
         if kind.startswith("stock_"):
+            buy = kind.endswith("buy")
             self._last_trade = {
-                "action": "buy" if kind.endswith("buy") else "sell",
+                "action": "buy" if buy else "sell",
                 "symbol": entry.get("symbol"),
                 "amount": entry.get("amount"),
                 "reason": entry.get("reason"),
                 "ts": entry.get("ts"),
             }
+            # 股票决策也进「记录」：为什么买、为什么卖
+            companion = self._companion()
+            record = getattr(companion, "_record", None) if companion is not None else None
+            if callable(record):
+                try:
+                    record("stock",
+                           ("买入 " if buy else "卖出 ") + str(entry.get("symbol") or ""),
+                           "价格 %s × %s 股" % (entry.get("price"), entry.get("qty")),
+                           "激进模式：看好就上（可用到 100%、含储蓄）" if buy else "落袋/止损",
+                           float(entry.get("amount") or 0))
+                except Exception as exc:
+                    logger.debug("[amo_fin] 股票记录失败: %s" % exc)
 
     # ------------------------------------------------------------------
     # 给终端用的公开接口（三个入口，不多）
