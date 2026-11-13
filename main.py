@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.9.3"
+PLUGIN_VERSION = "1.9.4"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -291,6 +291,11 @@ class AmoFinancePlugin(Star):
         self._history = list(history) if isinstance(history, list) else []
         del self._history[:-HISTORY_LIMIT]
         try:
+            if self._backfill_history_reasons():
+                self._save()
+        except Exception as exc:
+            logger.debug("[amo_fin] 流水原因回填失败: %s" % exc)
+        try:
             self._backfill_stock_flow()
         except Exception as exc:
             logger.debug("[amo_fin] 股票流水回填失败: %s" % exc)
@@ -306,6 +311,23 @@ class AmoFinancePlugin(Star):
             self._log({"kind": "init", "amount": self._ledger.balance,
                        "reason": "初始化", "balance": self._ledger.balance})
             self._save()
+
+    def _backfill_history_reasons(self) -> bool:
+        """老流水里 borrow/transfer_in 没写原因：补成中文，面板不再显示英文 kind。"""
+        changed = False
+        for entry in self._history:
+            if not isinstance(entry, dict):
+                continue
+            kind = str(entry.get("kind") or "")
+            reason = str(entry.get("reason") or "").strip()
+            if kind == "borrow" and not reason:
+                channel = str(entry.get("channel") or "transfer")
+                entry["reason"] = "借款：%s" % ("红包" if channel == "red" else "转账")
+                changed = True
+            elif kind == "transfer_in" and reason in ("", "用户转账"):
+                entry["reason"] = "借款：他转给我的"
+                changed = True
+        return changed
 
     def _backfill_stock_flow(self) -> None:
         """1.9.1 之前股票买卖没写流水：把已有的补进来，只补一次。
@@ -564,6 +586,7 @@ class AmoFinancePlugin(Star):
             self._log({
                 "kind": "transfer_in", "amount": round(float(amount), 2),
                 "from": from_user, "balance": result.get("balance"),
+                "reason": "借款：他转给我的",
             })
             self._note_gift(float(amount), "transfer")
             self._save()
@@ -662,6 +685,7 @@ class AmoFinancePlugin(Star):
             "kind": "borrow", "channel": channel, "amount": value,
             "from": from_user, "owed": round(self._ledger.owed_to_user, 2),
             "balance": result.get("balance"),
+            "reason": "借款：%s" % ("红包" if channel == "red" else "转账"),
         })
         self._note_gift(value, channel)
         self._save()

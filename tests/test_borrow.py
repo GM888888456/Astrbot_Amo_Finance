@@ -40,6 +40,22 @@ class BorrowTests(unittest.TestCase):
         self.assertAlmostEqual(p._ledger.owed_to_user, 500.0)
         self.assertEqual(p._ledger.month_income, 0.0, "借款不算收入")
 
+    def test_borrow_logs_chinese_reason(self):
+        p = build(balance=0)
+        p.borrow(500, "transfer")
+        self.assertTrue(str(p._history[-1].get("reason") or "").startswith("借款"))
+
+    def test_transfer_in_logs_chinese_reason(self):
+        p = build(balance=0)
+        p.transfer_in(500, "u")
+        self.assertTrue(str(p._history[-1].get("reason") or "").startswith("借款"))
+
+    def test_backfill_history_reasons(self):
+        p = build(balance=0)
+        p._history = [{"kind": "borrow", "channel": "red", "amount": 100}]
+        self.assertTrue(p._backfill_history_reasons())
+        self.assertIn("红包", p._history[0]["reason"])
+
     def test_red_packet_single_limit(self):
         p = build(balance=0)
         self.assertFalse(p.borrow(300, "red")["ok"], "单个红包最多 200")
