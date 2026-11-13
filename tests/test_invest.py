@@ -163,11 +163,18 @@ class InvestTests(unittest.TestCase):
         self.assertFalse(p._state.get("invest_seeded"), "行情拿不到就下次再试")
 
     def test_invest_tick_records_day_open(self):
+        """开盘记的是持仓市值；他转钱进来不能算成当日盈利。"""
         p = build()
+        p.invest_buy("600519", qty=100)
         p._invest_tick()
         day = p._state.get("invest_day") or {}
         self.assertTrue(day.get("date"))
-        self.assertGreater(day.get("open"), 0)
+        self.assertIn("open_value", day)
+        self.assertGreater(day.get("open_value"), 0)
+        before = p.mood_signal()
+        p.borrow(5000)
+        after = p.mood_signal()
+        self.assertAlmostEqual(after["day_pnl_pct"], before["day_pnl_pct"], places=2)
 
 
 if __name__ == "__main__":
