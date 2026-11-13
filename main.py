@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.2.8"
+PLUGIN_VERSION = "2.3.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1921,10 +1921,41 @@ class AmoFinancePlugin(Star):
                     missing.append({"item": item, "need": round(float(need), 2),
                                     "have": round(have, 2)})
             if missing:
-                return {"ok": False, "code": "need_grocery", "reason": "食材不够",
-                        "dish": dish, "switched": switched, "missing": missing,
-                        "grocery": _ledger_mod.grocery_cost(
-                            {m["item"]: m["need"] - m["have"] for m in missing}, city)[0]}
+                want = {m["item"]: round(float(m["need"]) - float(m["have"]), 2)
+                        for m in missing}
+                grocery_cost = _ledger_mod.grocery_cost(want, city)[0]
+                auto = True
+                try:
+                    auto = bool(self._cfg("auto_grocery", True))
+                except Exception:
+                    auto = True
+                if auto:
+                    # 缺什么顺路买什么：买齐再做饭，不再让她「先去买」等下一次
+                    rid = "meal-grocery:%s:%d" % (dish, int(_now() // 86400))
+                    try:
+                        bought = self.food_buy(want, request_id=rid)
+                    except Exception as exc:
+                        logger.debug("[amo_fin] 自动补菜失败: %s" % exc)
+                        bought = None
+                    if not isinstance(bought, dict) or not bought.get("ok"):
+                        return {"ok": False, "code": "need_grocery", "reason": "食材不够，买菜也没成",
+                                "dish": dish, "switched": switched, "missing": missing,
+                                "grocery": grocery_cost}
+                    pantry = self._pantry_map()
+                    left = []
+                    for item, need in (spec.get("items") or {}).items():
+                        if float(pantry.get(item, 0.0)) + 1e-9 < float(need):
+                            left.append(item)
+                    if left:
+                        return {"ok": False, "code": "need_grocery", "reason": "补了菜还是不够",
+                                "dish": dish, "switched": switched, "missing": missing,
+                                "grocery": grocery_cost}
+                    switched = ((switched + "；") if switched else "") + \
+                        "缺的菜顺路买齐了（%.1f 元）" % float(bought.get("total") or 0)
+                else:
+                    return {"ok": False, "code": "need_grocery", "reason": "食材不够",
+                            "dish": dish, "switched": switched, "missing": missing,
+                            "grocery": grocery_cost}
             satiety = int(spec.get("satiety") or 0)
             payee = "家里"
             reason = "自己做饭：%s" % dish
