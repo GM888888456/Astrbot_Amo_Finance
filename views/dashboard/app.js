@@ -164,7 +164,6 @@ async function openSubpage() {
     ? ((f.city || "") + (f.level ? " · " + f.level : "")) : "读取失败";
 }
 
-$("subOpen").addEventListener("click", openSubpage);
 $("brandTitle").addEventListener("dblclick", openSubpage);
 let _lastBrandTap = 0;
 $("brandTitle").addEventListener("touchend", (ev) => {
