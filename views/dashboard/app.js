@@ -69,22 +69,8 @@ async function loadStatus() {
   $("levelPill").textContent = kindText;
   const houseDesc = $("houseDesc");
   if (houseDesc) houseDesc.textContent = d.house_desc || "—";
-  const housePay = $("housePay");
-  if (housePay) {
-    const isRent = houseKind === "rent";
-    if ($("housePayLabel")) $("housePayLabel").textContent = isRent ? "月租" : "月供";
-    const value = isRent ? Number(d.house_rent || 0) : Number(d.mortgage || 0);
-    housePay.textContent = value > 0 ? money(value) + "/月" : "无";
-  }
   const carDesc = $("carDesc");
   if (carDesc) carDesc.textContent = d.car_desc || "—";
-  const carPay = $("carPay");
-  if (carPay) {
-    const isCarRent = String(d.car_kind || "") === "rent";
-    if ($("carPayLabel")) $("carPayLabel").textContent = isCarRent ? "月租" : "月供";
-    const value = isCarRent ? Number(d.car_rent || 0) : Number(d.car_loan || 0);
-    carPay.textContent = value > 0 ? money(value) + "/月" : "无";
-  }
   $("fixedTotal").textContent = money(d.fixed_total) + "/月";
   const a = Number(d.anxiety || 0);
   $("anxietyHint").textContent = a >= 0.7 ? "她现在有点为钱发愁（" + a.toFixed(2) + "）"
