@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.2.0"
+PLUGIN_VERSION = "2.2.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -323,7 +323,9 @@ class AmoFinancePlugin(Star):
         # 房车没规划过就按工资 + 城市自动安排（老账本也会补上）
         if not str(self._ledger.house_desc or "").strip():
             try:
-                plan_assets(self._ledger, self._city(), self._salary_net())
+                plan_assets(self._ledger, self._city(), self._salary_net(),
+                            persona_car=str(self._state.get("persona_car") or ""),
+                            persona_house=str(self._state.get("persona_house") or ""))
                 self._save()
                 logger.info("[amo_fin] 房车自动安排：%s｜%s",
                             self._ledger.house_desc, self._ledger.car_desc)
@@ -432,6 +434,35 @@ class AmoFinancePlugin(Star):
     # ------------------------------------------------------------------
     # 薪资：人格里写了就用人格的，没写按城市平均
     # ------------------------------------------------------------------
+
+    def set_persona_assets(self, car: str = "", house: str = "") -> dict[str, Any]:
+        """终端从人格里读到的房/车（比如「奔驰」）。
+
+        人格写了就用它，别再随机一套。
+        """
+        car = str(car or "").strip()
+        house = str(house or "").strip()
+        changed = False
+        if car and str(self._state.get("persona_car") or "") != car:
+            self._state["persona_car"] = car
+            changed = True
+        if house and str(self._state.get("persona_house") or "") != house:
+            self._state["persona_house"] = house
+            changed = True
+        if not changed:
+            return {"ok": True, "changed": False}
+        try:
+            plan_assets(self._ledger, self._city(), self._salary_net(), force=True,
+                        persona_car=str(self._state.get("persona_car") or ""),
+                        persona_house=str(self._state.get("persona_house") or ""))
+            self._save()
+            logger.info("[amo_fin] 按人格安排房车：%s｜%s",
+                        self._ledger.house_desc, self._ledger.car_desc)
+        except Exception as exc:
+            logger.warning("[amo_fin] 按人格安排房车失败: %s" % exc)
+            return {"ok": False, "reason": str(exc)}
+        return {"ok": True, "changed": True,
+                "house_desc": self._ledger.house_desc, "car_desc": self._ledger.car_desc}
 
     def _salary_net(self) -> float:
         """到手月薪：房车规划按到手算，别拿税前虚高。"""
@@ -1981,6 +2012,8 @@ class AmoFinancePlugin(Star):
             "house_rent": snap.get("house_rent"), "mortgage": snap.get("mortgage"),
             "car_kind": snap.get("car_kind"), "car_desc": snap.get("car_desc"),
             "car_rent": snap.get("car_rent"), "car_loan": snap.get("car_loan"),
+            "persona_car": str(self._state.get("persona_car") or ""),
+            "persona_house": str(self._state.get("persona_house") or ""),
             "salary": snap.get("salary") or self.salary_info(),
             "invest": snap.get("invest") or {},
             "borrow": snap.get("borrow") or self.borrow_info(),
@@ -2029,7 +2062,9 @@ class AmoFinancePlugin(Star):
                 pass
         try:
             plan_assets(self._ledger, self._city(), self._salary_net(),
-                        force=("own_house" in data or "own_car" in data))
+                        force=("own_house" in data or "own_car" in data),
+                        persona_car=str(self._state.get("persona_car") or ""),
+                        persona_house=str(self._state.get("persona_house") or ""))
         except Exception as exc:
             logger.debug("[amo_fin] 房车重新规划失败: %s" % exc)
         self._save()

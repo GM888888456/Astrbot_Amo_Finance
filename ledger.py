@@ -313,7 +313,8 @@ def monthly_loan(principal: float, annual_rate: float = 0.041, months: int = 360
 
 
 def plan_assets(ledger: Ledger, city: str = "", salary: float = 0.0,
-                force: bool = False) -> dict[str, Any]:
+                force: bool = False, persona_car: str = "",
+                persona_house: str = "") -> dict[str, Any]:
     """按工资和城市基准自动安排房和车，算出房租/月供。
 
     规则（用户定的）：
@@ -340,6 +341,9 @@ def plan_assets(ledger: Ledger, city: str = "", salary: float = 0.0,
     phase = chooser.choice(HOUSE_PHASES)
     room = "%d%02d" % (chooser.randint(3, 18), chooser.randint(1, 28))
     layout = chooser.choice(HOUSE_LAYOUTS)
+    # 人格里写了的房/车优先：她开奔驰就不能被随机成比亚迪
+    persona_house = str(persona_house or "").strip()
+    persona_car = str(persona_car or "").strip()
 
     if ledger.own_house or (ledger.house_kind == "own" and not force):
         ledger.house_kind = "own"
@@ -366,7 +370,14 @@ def plan_assets(ledger: Ledger, city: str = "", salary: float = 0.0,
         ledger.mortgage = 0.0
         ledger.house_rent = round(rent_base, 2)
         suffix = "租"
-    ledger.house_desc = "%s·%s·%s·%s·%s" % (house, phase, room, layout, suffix)
+    if persona_house:
+        # 人格只写了小区名的话，再补门牌/户型，别只剩一个「南明区·小窝·自」
+        if "室" in persona_house or persona_house.count("·") >= 2:
+            ledger.house_desc = "%s·%s" % (persona_house, suffix)
+        else:
+            ledger.house_desc = "%s·%s·%s·%s" % (persona_house, room, layout, suffix)
+    else:
+        ledger.house_desc = "%s·%s·%s·%s·%s" % (house, phase, room, layout, suffix)
 
     brand, model = chooser.choice(CAR_POOL)
     if ledger.own_car:
@@ -384,7 +395,10 @@ def plan_assets(ledger: Ledger, city: str = "", salary: float = 0.0,
         ledger.car_loan = 0.0
         ledger.car_rent = 2600.0
         car_suffix = "租"
-    ledger.car_desc = "%s·%s·%s" % (brand, model, car_suffix)
+    if persona_car:
+        ledger.car_desc = "%s·%s" % (persona_car, car_suffix)
+    else:
+        ledger.car_desc = "%s·%s·%s" % (brand, model, car_suffix)
 
     return {
         "house_desc": ledger.house_desc, "house_kind": ledger.house_kind,
