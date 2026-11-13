@@ -223,8 +223,28 @@ class AmoFinancePlugin(Star):
                     continue
         return merged
 
+    def set_persona_city(self, city: str) -> dict:
+        """终端从人格读到的城市：写进状态，房车/房租按它重算。"""
+        city = str(city or "").strip()
+        if not city:
+            return {"ok": False, "reason": "空城市"}
+        changed = str(self._state.get("persona_city") or "") != city
+        self._state["persona_city"] = city
+        if changed:
+            try:
+                plan_assets(self._ledger, city, self._salary_net(),
+                            persona_car=str(self._state.get("persona_car") or ""),
+                            persona_house=str(self._state.get("persona_house") or ""))
+                self._save()
+            except Exception as exc:
+                logger.debug("[amo_fin] 按城市重算房车失败: %s" % exc)
+        return {"ok": True, "changed": changed, "city": city}
+
     def _city(self) -> str:
-        """城市：配置优先；留空时向天气取。"""
+        """城市：终端推来的人格城市优先，其次天气，最后默认。"""
+        persona_city = str(self._state.get("persona_city") or "").strip()
+        if persona_city:
+            return persona_city
         value = self._str("city").strip()
         if value:
             return value

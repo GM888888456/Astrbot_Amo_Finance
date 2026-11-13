@@ -53,12 +53,6 @@
     "default": 10,
     "hint": "1-28。发薪日当天自动入账，重启不会重复发。"
   },
-  "city": {
-    "type": "string",
-    "description": "城市",
-    "default": "",
-    "hint": "留空 = 跟随天气插件里配置的城市。影响房租和日常消费的默认值。"
-  },
   "initial_balance": {
     "type": "float",
     "description": "初始余额",
