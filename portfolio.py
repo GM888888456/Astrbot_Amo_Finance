@@ -218,3 +218,37 @@ def qty_from_budget(budget: float, price: float, market: str) -> int:
     lot = lot_size(market)
     qty = int(math.floor(budget / (price * lot))) * lot
     return max(0, qty)
+
+
+def split_ratio(old_price: float, new_price: float) -> int:
+    """价格突然按整数倍缩小，判断是不是拆股（如 1200 → 120 是 10 拆 1）。
+
+    只认「新价 ≈ 旧价 / k」（k 为 2..50 的整数，误差 1% 内），涨上去不算。
+    """
+    try:
+        old_price = float(old_price)
+        new_price = float(new_price)
+    except (TypeError, ValueError):
+        return 0
+    if old_price <= 0 or new_price <= 0 or new_price >= old_price:
+        return 0
+    k = round(old_price / new_price)
+    if k < 2 or k > 50:
+        return 0
+    if abs(old_price / (new_price * k) - 1.0) > 0.01:
+        return 0
+    return int(k)
+
+
+def apply_split(pos: dict[str, Any], ratio: int) -> dict[str, Any]:
+    """拆股：股数 × ratio，单价 ÷ ratio，总成本不变。"""
+    ratio = int(ratio or 0)
+    if ratio < 2:
+        return pos
+    pos["qty"] = int(pos.get("qty") or 0) * ratio
+    for key in ("last", "prev_close"):
+        value = float(pos.get(key) or 0)
+        if value > 0:
+            pos[key] = round(value / ratio, 4)
+    pos["split_history"] = list(pos.get("split_history") or [])[-9:] + [ratio]
+    return pos

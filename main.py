@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.7"
+PLUGIN_VERSION = "2.3.8"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1035,6 +1035,8 @@ class AmoFinancePlugin(Star):
         positions = self._positions()
         if not positions:
             return
+        # 拆股检测：价格按整数倍腰斩时，股数×k、单价÷k，成本不变
+        # （行情源给的是拆股后价格，旧价格还留在持仓里，不处理就会显示成暴跌）
         quotes = self._board().quotes(list(positions), force=force)
         changed = False
         for code, pos in positions.items():
@@ -1042,7 +1044,24 @@ class AmoFinancePlugin(Star):
             if not data:
                 continue
             pos["name"] = data.get("name") or pos.get("name") or code
-            pos["last"] = data.get("price")
+            old_price = float(pos.get("last") or 0)
+            new_price = float(data.get("price") or 0)
+            ratio = pf.split_ratio(old_price, new_price)
+            if ratio:
+                pos["qty"] = int(pos.get("qty") or 0) * ratio
+                pos["split_history"] = list(pos.get("split_history") or [])[-9:] + [ratio]
+                logger.info("[amo_fin] 检测到拆股 %s：%s 拆 1，股数 %.2f → %s，成本不变" %
+                            (code, ratio, old_price, pos.get("qty")))
+                companion = self._companion()
+                record = getattr(companion, "_record", None) if companion is not None else None
+                if callable(record):
+                    try:
+                        record("stock", "拆股 %s" % (pos.get("name") or code),
+                               "%d 拆 1，股数变为 %s" % (ratio, pos.get("qty")),
+                               "拆股不改总成本", 0)
+                    except Exception:
+                        pass
+            pos["last"] = new_price
             pos["prev_close"] = data.get("prev_close")
             changed = True
         if changed:
