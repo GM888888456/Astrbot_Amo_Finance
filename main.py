@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.9.4"
+PLUGIN_VERSION = "2.0.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -720,17 +720,35 @@ class AmoFinancePlugin(Star):
             "amount": round(float(note.get("amount") or 0), 2),
             "remaining": round(float(note.get("remaining") or 0), 2),
             "seconds": int(age),
+            "ts": float(note.get("ts") or 0),
         }
 
-    def repay(self, amount: float) -> dict[str, Any]:
+    def repay(self, amount: float, notify: bool = True) -> dict[str, Any]:
         result = self._ledger.repay_user(amount)
         if result.get("ok"):
             self._log({"kind": "repay", "amount": result["paid"], "reason": "还他的钱",
                        "balance": result.get("balance"),
                        "remaining": result.get("remaining")})
             self._note_repay(result["paid"], result.get("remaining"))
+            if notify:
+                self._notify_repay(result["paid"], result.get("remaining") or 0)
             self._save()
         return result
+
+    def _notify_repay(self, amount: float, remaining: float) -> None:
+        """自动还款后给终端发一条消息；手动工具自己会回，不重复发。"""
+        companion = self._companion()
+        notifier = getattr(companion, "notify_repay", None) if companion is not None else None
+        if not callable(notifier):
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        try:
+            loop.create_task(notifier(float(amount or 0), float(remaining or 0)))
+        except Exception as exc:
+            logger.debug("[amo_fin] 还款通知失败: %s" % exc)
 
     # ------------------------------------------------------------------
     # 定时：发薪、固定支出
@@ -1636,12 +1654,55 @@ class AmoFinancePlugin(Star):
             return {"ok": False, "code": "bad_request", "reason": "没说要吃什么"}
         mode = str(method or "order").strip().lower()
         mode = {"eat": "order", "吃": "order", "做饭": "cook", "做": "cook",
-                "喝": "drink", "喝水": "drink", "买": "grocery", "买菜": "grocery"}.get(mode, mode)
+                "喝": "drink", "喝水": "drink", "买": "grocery", "买菜": "grocery",
+                "auto": "auto", "随便": "auto", "看情况": "auto"}.get(mode, mode)
         if mode == "grocery":
             return self.food_buy({dish: 1.0}, request_id=request_id)
 
         city = self._city()
         data = self._data()
+        weather = ""
+        try:
+            companion = self._companion()
+            state = getattr(companion, "state", None)
+            weather = str(((getattr(state, "weather", None) or {}) or {}).get("text") or "")
+        except Exception:
+            weather = ""
+        switched = ""
+        if mode == "auto":
+            cookable = dish in _ledger_mod.RECIPES
+            orderable = dish in _ledger_mod.READY_FOODS
+            if cookable and orderable:
+                cook_cost = _ledger_mod.recipe_cost(dish, city, weather)
+                order_price = _ledger_mod.ready_price(dish, self._prices(), city)
+                if order_price > 0 and cook_cost <= order_price:
+                    mode = "cook"
+                    switched = "今日菜价算下来，自己做约 %.1f 元，外卖 %.1f 元，自己做" % (
+                        cook_cost, order_price)
+                else:
+                    mode = "order"
+                    switched = "今日菜价算下来，自己做约 %.1f 元，外卖 %.1f 元，点外卖" % (
+                        cook_cost, order_price)
+            elif cookable:
+                mode = "cook"
+                switched = "外卖没有%s，自己做" % dish
+            elif orderable:
+                mode = "order"
+            else:
+                return {"ok": False, "code": "unknown", "reason": "菜单里没有这道菜"}
+        if mode in ("cook", "order"):
+            cookable = dish in _ledger_mod.RECIPES
+            orderable = dish in _ledger_mod.READY_FOODS
+            if mode == "cook" and cookable and orderable:
+                cook_cost = _ledger_mod.recipe_cost(dish, city, weather)
+                order_price = _ledger_mod.ready_price(dish, self._prices(), city)
+                if order_price > 0 and order_price < cook_cost:
+                    mode = "order"
+                    switched = "做饭约 %.1f 元，外卖 %.1f 元，改点外卖" % (
+                        cook_cost, order_price)
+            elif mode == "order" and not orderable and cookable:
+                mode = "cook"
+                switched = "外卖没有%s，改自己做" % dish
         cost = 0.0
         satiety = 0
         hydration = 0
@@ -1670,7 +1731,7 @@ class AmoFinancePlugin(Star):
                                     "have": round(have, 2)})
             if missing:
                 return {"ok": False, "code": "need_grocery", "reason": "食材不够",
-                        "dish": dish, "missing": missing,
+                        "dish": dish, "switched": switched, "missing": missing,
                         "grocery": _ledger_mod.grocery_cost(
                             {m["item"]: m["need"] - m["have"] for m in missing}, city)[0]}
             satiety = int(spec.get("satiety") or 0)
@@ -1721,6 +1782,7 @@ class AmoFinancePlugin(Star):
             "price": round(cost, 2), "satiety": satiety, "hydration": hydration,
             "reason": reason, "balance": round(self.balance(), 2),
             "vitals": after, "pantry": self._pantry_map() if mode == "cook" else None,
+            "switched": switched,
         }
 
     def _register_web_apis(self) -> None:

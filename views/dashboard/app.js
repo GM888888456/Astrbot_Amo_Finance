@@ -125,6 +125,40 @@ async function loadHistory() {
   }).join("");
 }
 
+async function openSubpage() {
+  $("subpage").hidden = false;
+  const d = await get("status");
+  if (d) {
+    $("subBalance").textContent = money(d.balance);
+    $("subSavings").textContent = money(d.savings);
+    $("subOwed").textContent = d.owed_to_user ? money(d.owed_to_user) : "无";
+    const pay = d.salary || {};
+    $("subGross").textContent = money(pay.gross);
+    $("subNet").textContent = money(pay.net);
+  }
+  const m = await get("market");
+  const prices = (m && m.prices) || {};
+  const names = Object.keys(prices).sort();
+  $("subMarket").innerHTML = names.length ? names.map((name) =>
+    '<li><span class="p">' + name + '</span><span class="s">¥' +
+    Number(prices[name] || 0).toFixed(2) + '</span></li>'
+  ).join("") : '<li class="empty">菜价读取失败</li>';
+  $("subMarketHint").textContent = m
+    ? ((m.date || "") + (m.weather ? " · " + m.weather : "")) : "读取失败";
+
+  const f = await get("food/quote");
+  const ready = (f && f.ready) || [];
+  $("subReady").innerHTML = ready.length ? ready.map((it) =>
+    '<li><span class="p">' + (it.name || "") + " · 饱食 " + (it.satiety || 0) + '</span>' +
+    '<span class="s">¥' + Number(it.price || 0).toFixed(2) + '</span></li>'
+  ).join("") : '<li class="empty">外卖价读取失败</li>';
+  $("subReadyHint").textContent = f
+    ? ((f.city || "") + (f.level ? " · " + f.level : "")) : "读取失败";
+}
+
+$("brandTitle").addEventListener("dblclick", openSubpage);
+$("subClose").addEventListener("click", () => { $("subpage").hidden = true; });
+
 $("saveAssets").addEventListener("click", async () => {
   const body = {
     own_house: $("own_house").checked,

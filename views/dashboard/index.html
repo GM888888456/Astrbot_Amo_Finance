@@ -10,35 +10,38 @@
 <body>
   <div class="wrap">
     <header>
-      <div class="brand"><span class="dot"></span><span>我想永远陪着你 · 金融</span></div>
+      <div class="brand" id="brandTitle" title="双击看今日菜价 / 外卖价">
+        <span class="dot"></span><span>我想永远陪着你 · 金融</span>
+      </div>
       <button class="btn save-top" id="saveAssets">保存</button>
     </header>
 <div id="linkbar" style="margin:8px 0 4px;padding:8px 10px;border-radius:10px;background:rgba(128,128,128,.10);font-size:12px;line-height:1.6">连接状态：检查中…</div>
 
-    <div class="card">
-      <div class="card-title"><span>钱包</span><span class="pill" id="levelPill">—</span></div>
-      <dl class="kv">
-        <dt>余额</dt><dd id="balance">—</dd>
-        <dt>储蓄</dt><dd id="savings">—</dd>
-        <dt>储蓄利息</dt><dd id="savingsRate">—</dd>
-        <dt>欠你</dt><dd id="owed">—</dd>
-        <dt>本月花</dt><dd id="spent">—</dd>
-        <dt>本月进</dt><dd id="earned">—</dd>
-        <dt>城市</dt><dd id="city">—</dd>
-      </dl>
-      <div class="meta" id="anxietyHint"></div>
-      <div class="hint" id="borrowHint">—</div>
-      <div class="meta">本行不提供贷款：你转给她的都算借款，她还你时记还款；借款不收利息，储蓄才有利息。</div>
-    </div>
+    <div class="grid2 cards">
+      <div class="card">
+        <div class="card-title"><span>资产</span><span class="pill" id="levelPill">—</span></div>
+        <dl class="kv">
+          <dt>余额</dt><dd id="balance">—</dd>
+          <dt>储蓄</dt><dd id="savings">—</dd>
+          <dt>储蓄利息</dt><dd id="savingsRate">—</dd>
+          <dt>欠你</dt><dd id="owed">—</dd>
+          <dt>本月花</dt><dd id="spent">—</dd>
+          <dt>本月进</dt><dd id="earned">—</dd>
+          <dt>城市</dt><dd id="city">—</dd>
+        </dl>
+        <div class="meta" id="anxietyHint"></div>
+        <div class="hint" id="borrowHint">—</div>
+      </div>
 
-    <div class="card">
-      <div class="card-title"><span>工资</span><span class="hint" id="salarySource">—</span></div>
-      <dl class="kv">
-        <dt>月薪（税前）</dt><dd id="salaryGross">—</dd>
-        <dt>到手</dt><dd id="salaryNet">—</dd>
-        <dt>发薪日</dt><dd id="salaryDay">—</dd>
-      </dl>
-      <div class="meta">自动：人格里写了月薪就用人格；没写就按她所在城市的平均（一线 13000 / 新一线 10000 / 二线 7800 / 三线 6000）。面板不再手填。</div>
+      <div class="card">
+        <div class="card-title"><span>工资</span><span class="hint" id="salarySource">—</span></div>
+        <dl class="kv">
+          <dt>月薪（税前）</dt><dd id="salaryGross">—</dd>
+          <dt>到手</dt><dd id="salaryNet">—</dd>
+          <dt>发薪日</dt><dd id="salaryDay">—</dd>
+        </dl>
+        <div class="meta">自动：人格里有就用，没有按城市平均；面板不再手填。</div>
+      </div>
     </div>
 
     <div class="card">
@@ -51,7 +54,7 @@
       </dl>
       <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
       <div class="meta" id="investMeta">模拟盘：行情来自腾讯公开接口。买卖是她自己的事，这里只看不管；成交会记进下面的流水。没钱了她会自己开口借。</div>
-      <div class="meta">在私聊里发「[转账]500 元」或「[红包]200 元」；也可以写 USD / HKD，会按汇率折成人民币记账。都算她欠你的（转账每天最多一万；红包单个最多 200、累计一万）。</div>
+      <div class="meta">双击顶部「金融」看今日菜价 / 外卖价。</div>
     </div>
 
     <div class="card">
@@ -60,7 +63,7 @@
     </div>
 
     <div class="card">
-      <div class="card-title"><span>资产</span></div>
+      <div class="card-title"><span>房车</span></div>
       <div class="grid2">
         <div class="field">
           <label class="check"><input type="checkbox" id="own_house" /> 名下有房</label>
@@ -83,6 +86,41 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.9.2"></script>
+
+  <div id="subpage" class="sheet" hidden>
+    <div class="sheet-head">
+      <div class="brand"><span class="dot"></span><span>金融 · 今日</span></div>
+      <button class="btn" id="subClose">关闭</button>
+    </div>
+    <div class="sheet-body">
+      <div class="grid2 cards">
+        <div class="card">
+          <div class="card-title"><span>资产</span></div>
+          <dl class="kv">
+            <dt>余额</dt><dd id="subBalance">—</dd>
+            <dt>储蓄</dt><dd id="subSavings">—</dd>
+            <dt>欠你</dt><dd id="subOwed">—</dd>
+          </dl>
+        </div>
+        <div class="card">
+          <div class="card-title"><span>工资</span></div>
+          <dl class="kv">
+            <dt>税前</dt><dd id="subGross">—</dd>
+            <dt>到手</dt><dd id="subNet">—</dd>
+          </dl>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>今日菜价</span><span class="hint" id="subMarketHint">—</span></div>
+        <ul class="list" id="subMarket"><li class="empty">加载中…</li></ul>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>今日外卖价</span><span class="hint" id="subReadyHint">—</span></div>
+        <ul class="list" id="subReady"><li class="empty">加载中…</li></ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js?v=2.0.0"></script>
 </body>
 </html>
