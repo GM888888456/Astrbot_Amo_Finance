@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.2.4"
+PLUGIN_VERSION = "2.2.5"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -188,15 +188,16 @@ class AmoFinancePlugin(Star):
         return self._bool("invest_aggressive", True)
 
     def _max_weight(self) -> float:
-        default = 0.60 if self._aggressive() else pf.MAX_WEIGHT
+        # 老板要求：激进模式单只可以到 100%，敢把储蓄金也压进去
+        default = 1.0 if self._aggressive() else pf.MAX_WEIGHT
         try:
             value = float(self._cfg("invest_max_weight", default) or default)
         except Exception:
             value = default
-        return max(0.10, min(0.95, value))
+        return max(0.10, min(1.0, value))
 
     def _max_positions(self) -> int:
-        default = 6 if self._aggressive() else pf.MAX_POSITIONS
+        default = 10 if self._aggressive() else pf.MAX_POSITIONS
         try:
             value = int(float(self._cfg("invest_max_positions", default) or default))
         except Exception:
@@ -1038,7 +1039,9 @@ class AmoFinancePlugin(Star):
             qty = int(qty)
         except (TypeError, ValueError):
             qty = 0
-        check = pf.can_buy(qty, price, self._ledger.balance, market)
+        # 可用资金 = 活期 + 储蓄；不够就动储蓄（她自己敢赌）
+        cash = round(float(self._ledger.balance) + float(self._ledger.savings or 0), 2)
+        check = pf.can_buy(qty, price, cash, market)
         if not check.get("ok"):
             return check
         # 单只上限跟配置走：激进模式放得更宽，但仍有顶
@@ -1059,6 +1062,7 @@ class AmoFinancePlugin(Star):
         result = self._ledger.apply(
             check["cost"], "transfer_out",
             reason="买入 %s %d 股" % (data.get("name") or code, qty),
+            from_savings=float(check["cost"]) > float(self._ledger.balance) + 0.001,
         )
         if not result.get("ok"):
             return result
@@ -1089,7 +1093,8 @@ class AmoFinancePlugin(Star):
         self._report_to_companion()
         return {"ok": True, "symbol": code, "name": data.get("name"), "qty": qty,
                 "price": price, "cost": check["cost"],
-                "balance": round(self._ledger.balance, 2)}
+                "balance": round(self._ledger.balance, 2),
+                "savings": round(float(self._ledger.savings or 0), 2)}
 
     def invest_sell(self, symbol: str, qty: int = 0, all_out: bool = False) -> dict[str, Any]:
         code = market_mod.normalize(symbol)

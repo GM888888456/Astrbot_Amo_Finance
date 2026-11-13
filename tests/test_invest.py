@@ -85,14 +85,13 @@ class InvestTests(unittest.TestCase):
         self.assertIn("太多", again["reason"])
 
     def test_aggressive_weight_cap(self):
-        """FX 战士：单只放宽到六成，但六成以上照样拦。"""
+        """FX 战士：单只可以压到 100%，持仓 10 只；钱不够才拦。"""
         p = build()
+        self.assertEqual(p._max_weight(), 1.0)
+        self.assertEqual(p._max_positions(), 10)
         self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
-        self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
-        self.assertTrue(p.invest_buy("600519", qty=200)["ok"])   # 4 成，允许
-        blocked = p.invest_buy("600519", qty=300)                # 7 成，超限
+        blocked = p.invest_buy("600519", qty=1000000)
         self.assertFalse(blocked["ok"], blocked)
-        self.assertIn("太多", blocked["reason"])
 
     def test_buy_goes_into_flow_not_month_spent(self):
         """买股是资产转换：进流水，但不进「本月花」。"""
