@@ -2,6 +2,10 @@
 
 给「我想永远陪着你-终端」做账本：钱从哪来、花到哪去、够不够花。
 
+## 2.1.1（资产/工资真正合并成一个框）
+
+- 去掉中间竖线和窄屏虚线，资产与工资在同一个卡里连续排列；有房/租房移到「钱包」后面。
+
 ## 2.1.0（并发修复 + 一个框 + 吃饭按日程）
 
 - 行情不再阻塞事件循环：tick/seed 走 `asyncio.to_thread`，`api_status`/`api_invest`/`api_assets`/`/money` 也走 `to_thread`；`snapshot`/`mood_signal` 支持 `refresh=False`，Amo 同步只读缓存。
