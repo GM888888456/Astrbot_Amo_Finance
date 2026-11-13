@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.8"
+PLUGIN_VERSION = "2.3.9"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -208,6 +208,44 @@ class AmoFinancePlugin(Star):
         except Exception:
             value = default
         return max(1, min(20, value))
+
+    def _apply_market_prices(self) -> None:
+        """把市场插件的当天菜价同步给计价模块（10 分钟一次，拿不到就保持上次）。"""
+        now = time.time()
+        if now - float(getattr(self, "_market_price_ts", 0) or 0) < 600:
+            return
+        prices = {}
+        try:
+            for meta in self.context.get_all_stars():
+                text = (str(getattr(meta, "name", "") or "") + " "
+                        + str(getattr(meta, "module_path", "") or ""))
+                if "Marketplace" not in text and "市场" not in text:
+                    continue
+                inst = None
+                for attr in ("star_cls", "star", "instance"):
+                    obj = getattr(meta, attr, None)
+                    if obj is None:
+                        continue
+                    inst = obj() if isinstance(obj, type) else obj
+                    break
+                items = getattr(inst, "items", None) if inst is not None else None
+                if callable(items):
+                    for row in items("groceries") or []:
+                        name = str(row.get("name") or "")
+                        price = float(row.get("price") or 0)
+                        if name and price > 0:
+                            prices[name] = price
+                    break
+        except Exception as exc:
+            logger.debug("[amo_fin] 同步市场价失败: %s" % exc)
+            return
+        if prices:
+            self._market_price_ts = now
+            try:
+                _ledger_mod.set_market_prices(prices)
+                logger.debug("[amo_fin] 已同步市场菜价 %d 种" % len(prices))
+            except Exception as exc:
+                logger.debug("[amo_fin] 写入市场价失败: %s" % exc)
 
     def _prices(self) -> dict[str, float]:
         """物价表：配置里写成 JSON 字符串，解析失败就用内置价格。"""
@@ -1971,6 +2009,10 @@ class AmoFinancePlugin(Star):
         dish = str(name or "").strip()
         if not dish:
             return {"ok": False, "code": "bad_request", "reason": "没说要吃什么"}
+        try:
+            self._apply_market_prices()
+        except Exception:
+            pass
         mode = str(method or "order").strip().lower()
         mode = {"eat": "order", "吃": "order", "做饭": "cook", "做": "cook",
                 "喝": "drink", "喝水": "drink", "买": "grocery", "买菜": "grocery",

@@ -555,10 +555,22 @@ def _groceries():
     return module
 
 
+#: 市场（Astrbot_Amo_Marketplace）当天的菜价，按名字覆盖内置表
+MARKET_PRICES: dict[str, float] = {}
+
+
+def set_market_prices(prices: dict[str, float] | None) -> None:
+    """把市场当日菜价灌进来；空字典表示清掉。"""
+    global MARKET_PRICES
+    MARKET_PRICES = {str(k): float(v) for k, v in (prices or {}).items() if v}
+
+
 def ingredient_price(item: str, city: str = "", weather: str = "",
                      holiday: str = "") -> float:
     """一份食材今天的价。优先问 groceries，问不到才用内置基准价。"""
     name = str(item or "")
+    if name in MARKET_PRICES:
+        return round(float(MARKET_PRICES[name]), 2)
     module = _groceries()
     if module is not None:
         try:
