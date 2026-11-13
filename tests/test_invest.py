@@ -75,13 +75,24 @@ class InvestTests(unittest.TestCase):
         self.assertEqual(p._positions(), {})
 
     def test_position_size_cap(self):
-        """单只不许超过总资产三成。"""
+        """普通模式：单只不许超过总资产三成。"""
         p = build()
+        p.config = {"invest_aggressive": False}
         self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
         self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
         again = p.invest_buy("600519", qty=200)   # 再买 2 万就到 4 成
         self.assertFalse(again["ok"], again)
         self.assertIn("太多", again["reason"])
+
+    def test_aggressive_weight_cap(self):
+        """FX 战士：单只放宽到六成，但六成以上照样拦。"""
+        p = build()
+        self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
+        self.assertTrue(p.invest_buy("600519", qty=100)["ok"])
+        self.assertTrue(p.invest_buy("600519", qty=200)["ok"])   # 4 成，允许
+        blocked = p.invest_buy("600519", qty=300)                # 7 成，超限
+        self.assertFalse(blocked["ok"], blocked)
+        self.assertIn("太多", blocked["reason"])
 
     def test_sell_returns_cash_and_clears(self):
         p = build()

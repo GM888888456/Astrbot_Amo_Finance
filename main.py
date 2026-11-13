@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.8.1"
+PLUGIN_VERSION = "1.9.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -177,6 +177,29 @@ class AmoFinancePlugin(Star):
     def _str(self, key: str, default: str = "") -> str:
         value = self._cfg(key, default)
         return default if value is None else str(value)
+
+    # ------------------------------------------------------------------
+    # 「FX 战士」：她自己的激进交易设定
+    # ------------------------------------------------------------------
+
+    def _aggressive(self) -> bool:
+        return self._bool("invest_aggressive", True)
+
+    def _max_weight(self) -> float:
+        default = 0.60 if self._aggressive() else pf.MAX_WEIGHT
+        try:
+            value = float(self._cfg("invest_max_weight", default) or default)
+        except Exception:
+            value = default
+        return max(0.10, min(0.95, value))
+
+    def _max_positions(self) -> int:
+        default = 6 if self._aggressive() else pf.MAX_POSITIONS
+        try:
+            value = int(float(self._cfg("invest_max_positions", default) or default))
+        except Exception:
+            value = default
+        return max(1, min(20, value))
 
     def _prices(self) -> dict[str, float]:
         """物价表：配置里写成 JSON 字符串，解析失败就用内置价格。"""
@@ -399,6 +422,10 @@ class AmoFinancePlugin(Star):
                       "day_pnl": 0, "equity": self._ledger.balance,
                       "cash": self._ledger.balance}
         data["invest"] = invest
+        try:
+            data["gift"] = self.money_gift()
+        except Exception:
+            data["gift"] = {}
         return data
 
     def recent(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -494,6 +521,7 @@ class AmoFinancePlugin(Star):
                 "kind": "transfer_in", "amount": round(float(amount), 2),
                 "from": from_user, "balance": result.get("balance"),
             })
+            self._note_gift(float(amount), "transfer")
             self._save()
         return result
 
@@ -522,6 +550,33 @@ class AmoFinancePlugin(Star):
             "red_total": round(red_used, 2),
             "red_left": round(max(0.0, self.BORROW_RED_TOTAL - red_used), 2),
             "red_max_once": self.BORROW_RED_MAX,
+        }
+
+    #: 收到钱之后多久内她还记得说句好听的
+    GIFT_NOTE_TTL = 900
+
+    def _note_gift(self, amount: float, channel: str) -> None:
+        self._state["money_gift"] = {
+            "ts": _now(), "amount": round(float(amount or 0), 2),
+            "channel": channel, "owed": round(self._ledger.owed_to_user, 2),
+        }
+
+    def money_gift(self) -> dict[str, Any]:
+        """最近一次收到钱的记录（15 分钟内有效），终端用它让她说句好听的。"""
+        note = self._state.get("money_gift")
+        if not isinstance(note, dict):
+            return {}
+        try:
+            age = _now() - float(note.get("ts") or 0)
+        except Exception:
+            age = 1e9
+        if age < 0 or age > self.GIFT_NOTE_TTL:
+            return {}
+        return {
+            "amount": round(float(note.get("amount") or 0), 2),
+            "channel": str(note.get("channel") or "transfer"),
+            "owed": round(float(note.get("owed") or 0), 2),
+            "seconds": int(age),
         }
 
     def borrow(self, amount: float, kind: str = "transfer", from_user: str = "") -> dict[str, Any]:
@@ -564,6 +619,7 @@ class AmoFinancePlugin(Star):
             "from": from_user, "owed": round(self._ledger.owed_to_user, 2),
             "balance": result.get("balance"),
         })
+        self._note_gift(value, channel)
         self._save()
         logger.info("[amo_fin] 她借了 %.2f（%s），共欠 %.2f"
                     % (value, "红包" if channel == "red" else "转账", self._ledger.owed_to_user))
@@ -632,7 +688,7 @@ class AmoFinancePlugin(Star):
         out = []
         for item in raw or []:
             code = market_mod.normalize(str(item))
-            if code:
+            if code and code not in out:
                 out.append(code)
         return out or list(pf.DEFAULT_WATCHLIST)
 
@@ -683,7 +739,33 @@ class AmoFinancePlugin(Star):
         except Exception:
             summary["stance"] = ""
         summary["leek"] = dict(self._state.get("invest_leek") or {})
+        summary["bankrupt"] = self._bankrupt_from(summary)
+        summary["aggressive"] = self._aggressive()
+        summary["max_weight"] = round(self._max_weight(), 3)
+        summary["max_positions"] = self._max_positions()
         return summary
+
+    def _bankrupt_from(self, summary: dict[str, Any]) -> dict[str, Any]:
+        """她离「破产」还有多远——终端据此让她哭。
+
+        现金见底、权益也很小 → broke；浮亏 -12% 以上 → losing；-25% 以上 → ruined。
+        """
+        try:
+            pnl_pct = float(summary.get("total_pnl_pct") or 0)
+            cash = float(summary.get("cash") or 0)
+            equity = float(summary.get("equity") or 0)
+        except Exception:
+            pnl_pct = cash = equity = 0.0
+        level = "ok"
+        if cash < 100 and equity < 1500:
+            level = "broke"
+        elif pnl_pct <= -25.0:
+            level = "ruined"
+        elif pnl_pct <= -12.0:
+            level = "losing"
+        return {"level": level, "pnl_pct": round(pnl_pct, 2),
+                "cash": round(cash, 2), "equity": round(equity, 2),
+                "owed": round(self._ledger.owed_to_user, 2)}
 
     def invest_buy(self, symbol: str, qty: int = 0, budget: float = 0.0) -> dict[str, Any]:
         """买入。先看行情、再看钱、再落账——行情拿不到就明确失败。"""
@@ -705,16 +787,21 @@ class AmoFinancePlugin(Star):
         check = pf.can_buy(qty, price, self._ledger.balance, market)
         if not check.get("ok"):
             return check
-        # 单只不超过总资产三成：不许一把梭
+        # 单只上限跟配置走：激进模式放得更宽，但仍有顶
         summary = self.invest_summary()
         equity = max(summary["equity"], 1.0)
+        positions = self._positions()
+        held_count = len([p for p in positions.values() if int(p.get("qty") or 0) > 0])
+        if code not in positions and held_count >= self._max_positions():
+            return {"ok": False,
+                    "reason": "已经拿了 %d 只，先卖一只再买" % self._max_positions()}
         holding = self._positions().get(code) or {}
         rate = float(self._fx().get(str(holding.get("currency") or "CNY"), 1.0) or 1.0)
         held_value = float(holding.get("qty") or 0) * float(holding.get("last") or price) * rate
         after = held_value + check["cost"]
-        if after / equity > pf.MAX_WEIGHT + 0.001:
+        if after / equity > self._max_weight() + 0.001:
             return {"ok": False, "reason": "这只占得太多了，别一把梭",
-                    "limit": round(equity * pf.MAX_WEIGHT, 2)}
+                    "limit": round(equity * self._max_weight(), 2)}
         result = self._ledger.apply(
             check["cost"], "expense",
             reason="买入 %s %d 股" % (data.get("name") or code, qty),
@@ -788,10 +875,10 @@ class AmoFinancePlugin(Star):
                 "balance": round(self._ledger.balance, 2)}
 
     def _seed_invest_once(self) -> None:
-        """第一次装好：先买 100 股，让「我有股票」这件事真实发生。
+        """第一次装好：让她真的「有股票」，不是只有个空账户。
 
-        用户不用替她买；她自己开户、自己下单。只买一手（100 股），且不超过总资产三成，
-        买不起就换下一只；都买不起或行情拿不到就下次再试。
+        激进模式下不再只买一手：最多挑 3 只各买一手，受单只上限和现金约束。
+        用户不用替她买；她自己开户、自己下单。
         """
         if self._state.get("invest_seeded"):
             return
@@ -799,7 +886,11 @@ class AmoFinancePlugin(Star):
             self._state["invest_seeded"] = True
             self._save()
             return
+        bought = 0
+        target = min(3, self._max_positions())
         for code in self._watchlist():
+            if bought >= target:
+                break
             quotes = self._board().quotes([code])
             data = quotes.get(code)
             if not data:
@@ -809,20 +900,23 @@ class AmoFinancePlugin(Star):
             check = pf.can_buy(100, price, self._ledger.balance, market)
             if not check.get("ok"):
                 continue
-            if check["cost"] > self._ledger.balance * pf.MAX_WEIGHT:
-                continue          # 一手就超过三成：这只太贵，换一只
+            if check["cost"] > self._ledger.balance * self._max_weight():
+                continue          # 一手就超过上限：这只太贵，换一只
             result = self.invest_buy(code, qty=100)
             if result.get("ok"):
-                self._state["invest_seeded"] = True
+                bought += 1
                 self._state["invest_seed_info"] = {
                     "symbol": result.get("symbol"), "name": result.get("name"),
                     "qty": result.get("qty"), "price": result.get("price"),
                     "cost": result.get("cost"), "ts": _now(),
                 }
                 self._save()
-                logger.info("[amo_fin] 第一次装好，买了 100 股 %s（¥%.2f）"
+                logger.info("[amo_fin] 建仓：买了 100 股 %s（¥%.2f）"
                             % (result.get("name"), float(result.get("cost") or 0)))
-                return
+        if bought:
+            self._state["invest_seeded"] = True
+            self._save()
+            return
         logger.info("[amo_fin] 这次没买成（行情或余额不够），下次再试")
 
     #: 韭菜档位阈值：涨/跌超过这个百分比就进入相应的情绪档
@@ -880,10 +974,10 @@ class AmoFinancePlugin(Star):
             price = float(data["price"])
             market = market_mod.market_of(symbol)
             held = float((positions.get(symbol) or {}).get("qty") or 0) * price
-            room = max(0.0, equity * pf.MAX_WEIGHT - held)
+            room = max(0.0, equity * self._max_weight() - held)
             if room <= 0:
                 continue
-            budget = min(self._ledger.balance * 0.9, room * 0.95)
+            budget = min(self._ledger.balance * 0.95, room * 0.98)
             qty = pf.qty_from_budget(budget, price, market)
             if qty <= 0:
                 continue
@@ -921,8 +1015,12 @@ class AmoFinancePlugin(Star):
             self._state["invest_day"] = {"date": today, "open": round(equity, 2)}
             self._save()
         stance = str((self.market_stance() or {}).get("stance") or "")
-        if stance == "overconfident":
-            # 上头了：她自己加仓（守三成上限），没人替她点按钮
+        try:
+            total_pct = float(self.mood_signal().get("total_pnl_pct") or 0)
+        except Exception:
+            total_pct = 0.0
+        if stance == "overconfident" or (self._aggressive() and total_pct <= -10.0):
+            # 上头 / 亏红了眼：她自己加仓（守配置上限），没人替她点按钮
             self._leek_add_position()
 
         if self._state.get("invest_auto_date") == today:
@@ -935,12 +1033,14 @@ class AmoFinancePlugin(Star):
             actions = []
         else:
             actions = pf.suggest_actions(
-                self._positions(), self._ledger.balance, self._watchlist(), self._fx(), self._rng,
+                self._positions(), self._ledger.balance, self._watchlist(), self._fx(),
+                self._rng, aggressive=self._aggressive(),
+                max_weight=self._max_weight(), max_positions=self._max_positions(),
             )
             if stance == "hodl":
                 # 死扛：赚了也不卖、亏了更不卖（这次连止盈都不执行）
                 actions = [a for a in actions if a.get("action") != "sell"]
-        for item in actions[:2]:
+        for item in actions[:(4 if self._aggressive() else 2)]:
             if item.get("action") == "sell":
                 result = self.invest_sell(item["symbol"], item.get("qty") or 0)
             else:
@@ -1472,6 +1572,7 @@ class AmoFinancePlugin(Star):
             "salary": snap.get("salary") or self.salary_info(),
             "invest": snap.get("invest") or self.invest_summary(),
             "borrow": snap.get("borrow") or self.borrow_info(),
+            "gift": snap.get("gift") or {},
             "uptime": int(_now() - self._started_at),
         }})
 

@@ -21,7 +21,7 @@
     "type": "bool",
     "description": "她自己会买卖",
     "default": true,
-    "hint": "买卖是她自己的事：每天看一眼，赚 8% 落袋、亏 10% 割肉、上头的日子自己加仓。关掉她就完全不动了。"
+    "hint": "买卖是她自己的事：每天看一眼，赚 8% 落袋、亏 10% 割肉、上头的日子自己加仓。打开「FX 战士」后改成赚 20%~30% 才卖、亏了反而补仓，一天最多四笔。"
   },
   "invest_watchlist": {
     "type": "text",
@@ -118,5 +118,23 @@
     "description": "焦虑阈值",
     "default": 0.5,
     "hint": "余额撑不住固定支出的程度超过这个值，她会开始焦虑。0 = 总有安全感，1 = 只有快花光才焦虑。"
+  },
+  "invest_aggressive": {
+    "type": "bool",
+    "description": "FX 战士（激进交易）",
+    "default": true,
+    "hint": "她自己的风格：敢重仓、敢加仓，亏了不认输、赚了要吹。关掉就回到赚 8% 跑、亏 10% 割的散户模式。"
+  },
+  "invest_max_weight": {
+    "type": "float",
+    "description": "单只股票最多占总资产",
+    "default": 0.6,
+    "hint": "0.1 ~ 0.95。0.3 = 三成（稳健），0.6 = 六成（FX 战士）。这是她自己给自己定的上限。"
+  },
+  "invest_max_positions": {
+    "type": "int",
+    "description": "最多同时持有几只",
+    "default": 6,
+    "hint": "激进模式 6 只，普通模式 3 只。满了以后要先卖才能买新的。"
   }
 }

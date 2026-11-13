@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f4f4f6" />
   <title>我想永远陪着你-金融</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -10,9 +11,9 @@
   <div class="wrap">
     <header>
       <div class="brand"><span class="dot"></span><span>我想永远陪着你 · 金融</span></div>
+      <button class="btn save-top" id="saveAssets">保存</button>
     </header>
 <div id="linkbar" style="margin:8px 0 4px;padding:8px 10px;border-radius:10px;background:rgba(128,128,128,.10);font-size:12px;line-height:1.6">连接状态：检查中…</div>
-
 
     <div class="card">
       <div class="card-title"><span>钱包</span><span class="pill" id="levelPill">—</span></div>
@@ -35,12 +36,7 @@
         <dt>到手</dt><dd id="salaryNet">—</dd>
         <dt>发薪日</dt><dd id="salaryDay">—</dd>
       </dl>
-      <div class="row">
-        <input id="salaryInput" type="number" min="0" step="100" placeholder="留空 = 自动（人格 → 城市平均）" />
-        <button class="btn" id="saveSalary">保存</button>
-        <span class="hint" id="salaryHint"></span>
-      </div>
-      <div class="meta">自动：人格里写了月薪就用人格；没写就按城市平均（一线 13000 / 新一线 10000 / 二线 7800 / 三线 6000）。</div>
+      <div class="meta">自动：人格里写了月薪就用人格；没写就按她所在城市的平均（一线 13000 / 新一线 10000 / 二线 7800 / 三线 6000）。面板不再手填。</div>
     </div>
 
     <div class="card">
@@ -52,12 +48,25 @@
         <dt>现金</dt><dd id="investCash">—</dd>
       </dl>
       <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
-      <div class="meta">模拟盘：行情来自腾讯公开接口。买卖是她自己的事，这里只看不管；她没钱了你再给她转。</div>
-      <div class="row">
-        <input id="topupInput" type="number" min="0" step="100" placeholder="给她转多少（兜底）" />
-        <button class="btn" id="topupBtn">转给她</button>
-        <span class="hint" id="topupHint"></span>
+      <div class="meta" id="investMeta">模拟盘：行情来自腾讯公开接口。买卖是她自己的事，这里只看不管；没钱了她会自己开口借。</div>
+      <div class="grid2">
+        <div class="field">
+          <label>[转账]</label>
+          <div class="row">
+            <input id="transferInput" type="number" min="0" step="100" placeholder="金额" />
+            <button class="btn" id="transferBtn">转</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>[红包]</label>
+          <div class="row">
+            <input id="redInput" type="number" min="0" step="10" placeholder="金额" />
+            <button class="btn" id="redBtn">发</button>
+          </div>
+        </div>
       </div>
+      <span class="hint" id="giftHint"></span>
+      <div class="meta">这两笔都算她欠你的（转账每天最多一万；红包单个最多 200、累计一万）。她收到会高兴，也会记着要还。</div>
     </div>
 
     <div class="card">
@@ -73,10 +82,7 @@
         <div class="field"><label>房贷月供</label><input id="mortgage" type="number" min="0" /></div>
         <div class="field"><label>车贷月供</label><input id="car_loan" type="number" min="0" /></div>
       </div>
-      <div class="row">
-        <button class="btn" id="saveAssets">保存</button>
-        <span class="hint" id="assetsHint"></span>
-      </div>
+      <span class="hint" id="assetsHint">改完点右上角「保存」。</span>
     </div>
 
     <div class="card">
@@ -86,6 +92,6 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.6.0"></script>
+  <script src="./app.js?v=1.9.0"></script>
 </body>
 </html>

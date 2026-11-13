@@ -42,6 +42,12 @@ function money(v) {
   return "¥" + n.toFixed(2);
 }
 
+const BANKRUPT_TEXT = {
+  losing: "她最近亏得有点多，嘴上还硬，心里已经开始发慌了。",
+  ruined: "她已经亏到快破产了，会来找你哭「老公我好像有点破产了」。",
+  broke: "她卡里基本没钱了，会来找你哭「老公我好像有点破产了」。",
+};
+
 async function loadStatus() {
   const d = await get("status");
   if (!d) { $("balance").textContent = "读取失败"; return; }
@@ -57,7 +63,6 @@ async function loadStatus() {
   $("salaryNet").textContent = money(pay.net);
   $("salaryDay").textContent = pay.pay_day ? ("每月 " + pay.pay_day + " 号") : "—";
   $("salarySource").textContent = pay.source || "—";
-  if (!$("salaryInput").value && pay.gross) $("salaryInput").value = Math.round(pay.gross);
   $("levelPill").textContent = d.own_house ? "有房" : "租房";
   $("fixedTotal").textContent = money(d.fixed_total) + "/月";
   const a = Number(d.anxiety || 0);
@@ -70,7 +75,7 @@ async function loadStatus() {
     $("borrowHint").textContent = owed > 0
       ? ("她欠你 " + money(owed) + "；今天转账还可借 " + money(bor.transfer_left || 0) +
          "，红包剩 " + money(bor.red_left || 0))
-      : ("借钱给她：转账每天最多一万 / 红包单个最多 200（累计一万）。聊天里发「[转账]500」或「[红包]200」即可。");
+      : ("借钱给她：转账每天最多一万 / 红包单个最多 200（累计一万）。聊天里发「[转账]500」或「[红包]200」也可以。");
   }
 
   const inv = d.invest || {};
@@ -80,12 +85,19 @@ async function loadStatus() {
   $("investPnl").textContent = (pnl >= 0 ? "+" : "") + money(pnl);
   $("investDay").textContent = (dayPnl >= 0 ? "+" : "") + money(dayPnl);
   $("investCash").textContent = money(inv.cash);
-  $("investPill").textContent = (inv.count || 0) + " 只持仓";
+  $("investPill").textContent = (inv.aggressive ? "FX 战士 · " : "") + (inv.count || 0) + " 只持仓";
   $("positions").innerHTML = (inv.positions || []).map((i) =>
     '<li><span class="p">' + (i.name || i.symbol) + " · " + i.qty + " 股</span>" +
     '<span class="s">' + money(i.market_value) + "（" +
     (i.pnl >= 0 ? "+" : "") + i.pnl_pct.toFixed(1) + "%）</span></li>"
-  ).join("") || '<li class="empty">还没有持仓，等她自己去买，或者你手动下一单</li>';
+  ).join("") || '<li class="empty">还没有持仓，等她自己去买</li>';
+
+  const bk = inv.bankrupt || {};
+  const bkText = BANKRUPT_TEXT[bk.level] || "";
+  $("investMeta").textContent = (bkText ? bkText + " " : "") +
+    "模拟盘：行情来自腾讯公开接口。" +
+    (inv.aggressive ? ("她现在最多拿 " + Math.round(Number(inv.max_weight || 0.6) * 100) +
+      "% 的身家压一只股票、最多 " + (inv.max_positions || 6) + " 只。") : "");
 
   $("fixed").innerHTML = (d.fixed || []).map((i) =>
     '<li><span class="p">' + i.name + '</span><span class="s">' + money(i.amount) + "</span></li>"
@@ -112,28 +124,26 @@ async function loadHistory() {
   }).join("");
 }
 
-async function topUp() {
-  const amount = Number($("topupInput").value || 0);
-  if (!amount) { $("topupHint").textContent = "填个金额"; return; }
-  $("topupHint").textContent = "转账中…";
-  const res = await post("income", { amount: amount, reason: "他转给我的" });
-  $("topupHint").textContent = res ? "已到账。" : "失败了";
-  $("topupInput").value = "";
-  loadStatus();
+async function sendGift(kind) {
+  const isRed = kind === "red";
+  const input = isRed ? $("redInput") : $("transferInput");
+  const amount = Number(input.value || 0);
+  if (!amount || amount <= 0) { $("giftHint").textContent = "先填个金额"; return; }
+  $("giftHint").textContent = isRed ? "发红包中…" : "转账中…";
+  const res = await post("borrow", { amount: amount, kind: kind });
+  if (res && res.ok) {
+    $("giftHint").textContent = "已到账，她欠你 " + money(res.owed || 0) +
+      "。等她开口，会甜甜地谢你的。";
+    input.value = "";
+    loadStatus();
+    loadHistory();
+  } else {
+    $("giftHint").textContent = (res && res.reason) || "没成功，稍后再试";
+  }
 }
 
-$("topupBtn").addEventListener("click", topUp);
-
-$("saveSalary").addEventListener("click", async () => {
-  const value = Number($("salaryInput").value || 0);
-  if (!value) {
-    $("salaryHint").textContent = "填一个正数；想恢复自动就把配置里的 salary 改成 0。";
-    return;
-  }
-  const res = await post("salary", { salary: value });
-  $("salaryHint").textContent = res ? "已保存。" : "保存失败。";
-  loadStatus();
-});
+$("transferBtn").addEventListener("click", () => sendGift("transfer"));
+$("redBtn").addEventListener("click", () => sendGift("red"));
 
 $("saveAssets").addEventListener("click", async () => {
   const body = {
