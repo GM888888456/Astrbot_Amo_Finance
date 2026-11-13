@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.4.0"
+PLUGIN_VERSION = "2.4.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -739,14 +739,18 @@ class AmoFinancePlugin(Star):
         replay = self._replay_charge(rid, amount=amount, reason=reason, payee=payee)
         if replay is not None:
             return replay
+        # 卡里不够时默认从储蓄补：她不该因为「钱存在储蓄里」而被当成没钱。
+        use_savings = bool(from_savings) or self.savings_auto_cover()
         result = self._ledger.apply(
-            amount, "expense", reason=reason, from_savings=from_savings
+            amount, "expense", reason=reason, from_savings=use_savings
         )
         if result.get("ok"):
             self._log({
                 "kind": "expense", "amount": round(float(amount), 2),
                 "reason": reason, "payee": payee,
                 "balance": result.get("balance"),
+                "savings": result.get("savings"),
+                "from_savings": result.get("from_savings"),
                 "request_id": rid,
             })
             self._remember_charge(rid, result, amount=amount, reason=reason, payee=payee)
@@ -1657,6 +1661,14 @@ class AmoFinancePlugin(Star):
     REPAY_RESERVE_EXTRA = 300.0
     REPAY_DAY_MAX = 5000.0
     REPAY_MIN = 50.0
+
+    def savings_auto_cover(self) -> bool:
+        """卡里不够时自动从储蓄补。
+
+        她的钱就是她的钱：卡里 0、储蓄 2 万，不代表她「没钱」。
+        关掉就退回「卡里不够就花不了」的老行为。
+        """
+        return self._bool("savings_auto_cover", True)
 
     def savings_rate(self) -> float:
         """储蓄年化利率（%）。借款没有利息——情侣之间不收。"""

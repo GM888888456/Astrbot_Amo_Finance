@@ -1,5 +1,12 @@
 # 更新日志
 
+## 2.4.1（卡里不够时自动从储蓄扣）
+
+- 新增 `savings_auto_cover`（默认开）：`charge()` 的支出在活期不够时自动从储蓄补，
+  不再出现「卡里 0、储蓄 2 万，却连吃饭都说没钱」。
+- 流水里带上 `savings` 与 `from_savings`（这次从储蓄扣了多少），账能对得上。
+- 关掉即回到老行为（只用活期）。测试新增 `tests/test_savings_cover.py`。
+
 ## 2.4.0（外卖价接市场）
 
 - 同步市场 `takeout` 当日价到 `ledger.MARKET_TAKEOUT`，`ready_price` 遇到同名外卖直接用市场价；没有同名才回落到内置价。

@@ -119,6 +119,12 @@
     "default": 6,
     "hint": "激进模式 6 只，普通模式 3 只。满了以后要先卖才能买新的。"
   },
+  "savings_auto_cover": {
+    "type": "bool",
+    "description": "卡里不够时自动从储蓄扣",
+    "default": true,
+    "hint": "她的钱就是她的钱：卡里 0、储蓄 2 万，不该被当成没钱。关掉就退回「卡里不够就花不了」。"
+  },
   "savings_rate": {
     "type": "float",
     "description": "储蓄年化利率（%）",
