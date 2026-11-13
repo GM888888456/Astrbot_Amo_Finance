@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.5"
+PLUGIN_VERSION = "2.3.6"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1051,6 +1051,10 @@ class AmoFinancePlugin(Star):
     def invest_summary(self, force: bool = False,
                        with_stance: bool = True,
                        refresh: bool = True) -> dict[str, Any]:
+        try:
+            self._repair_fx_underpaid()
+        except Exception as exc:
+            logger.debug("[amo_fin] 汇率差额补扣失败: %s" % exc)
         if refresh:
             self._invest_refresh(force=force)
         summary = pf.summarize(self._positions(), self._fx())
@@ -1094,6 +1098,46 @@ class AmoFinancePlugin(Star):
         return {"level": level, "pnl_pct": round(pnl_pct, 2),
                 "cash": round(cash, 2), "equity": round(equity, 2),
                 "owed": round(self._ledger.owed_to_user, 2)}
+
+    def _repair_fx_underpaid(self) -> None:
+        """把历史美股/港股「按原币扣了人民币」的差额补扣掉。
+
+        旧代码 `can_buy` 用美元金额直接和人民币余额比，NVDA 10 股只扣了 1596，
+        实际应扣 ≈10648。折算成本后必须把差额从账上补回来，否则资产凭空多出来。
+        幂等：每只持仓修完打 `fx_settled`。
+        """
+        positions = self._positions()
+        history = self._state.get("invest_history") or []
+        fixed = []
+        for code, pos in list(positions.items()):
+            if not isinstance(pos, dict) or pos.get("fx_settled"):
+                continue
+            cost = float(pos.get("cost") or 0)
+            if cost <= 0:
+                continue
+            paid = 0.0
+            for row in history:
+                if (str(row.get("symbol") or "") == str(code)
+                        and str(row.get("action") or "") == "buy"):
+                    paid += float(row.get("amount") or 0)
+            owed = round(cost - paid, 2)
+            if owed <= 1.0:
+                pos["fx_settled"] = True
+                continue
+            from_savings = owed > float(self._ledger.balance)
+            result = self._ledger.apply(
+                owed, "transfer_out",
+                reason="补扣：%s 买入汇率差额" % (pos.get("name") or code),
+                from_savings=from_savings,
+            )
+            if result.get("ok"):
+                pos["fx_settled"] = True
+                fixed.append((code, owed, from_savings))
+        if fixed:
+            for code, owed, saved in fixed:
+                logger.info("[amo_fin] 补扣汇率差额 %s：%.2f（%s）" %
+                            (code, owed, "储蓄" if saved else "余额"))
+            self._save()
 
     def invest_buy(self, symbol: str, qty: int = 0, budget: float = 0.0) -> dict[str, Any]:
         """买入。先看行情、再看钱、再落账——行情拿不到就明确失败。"""
