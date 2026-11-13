@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.0.0"
+PLUGIN_VERSION = "2.1.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -466,7 +466,7 @@ class AmoFinancePlugin(Star):
         logger.info("[amo_fin] 月薪已设置：%.0f（%s）" % (value, source))
         return {"ok": True, "salary": self.salary_info()}
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self, refresh: bool = True) -> dict[str, Any]:
         data = self._ledger.snapshot()
         data["city"] = self._city()
         data["city_level"] = city_level(self._city())
@@ -476,7 +476,7 @@ class AmoFinancePlugin(Star):
         data["salary"] = self.salary_info()
         data["borrow"] = self.borrow_info()
         try:
-            invest = self.invest_summary()
+            invest = self.invest_summary(refresh=refresh)
         except Exception as exc:
             logger.debug("[amo_fin] 投资快照失败: %s" % exc)
             invest = {"positions": [], "count": 0, "total_value": 0,
@@ -774,12 +774,12 @@ class AmoFinancePlugin(Star):
         # 先等 20 秒：终端在 on_astrbot_loaded 里推人格月薪，别抢在它前面按城市平均发一遍
         await asyncio.sleep(20)
         try:
-            self._seed_invest_once()
+            await asyncio.to_thread(self._seed_invest_once)
         except Exception as exc:
             logger.warning("[amo_fin] 首次建仓失败: %s" % exc)
         while True:
             try:
-                self.tick()
+                await asyncio.to_thread(self.tick)
             except Exception as exc:
                 logger.warning("[amo_fin] 月度结算失败: %s" % exc)
             await asyncio.sleep(self.TICK_INTERVAL)
@@ -851,15 +851,21 @@ class AmoFinancePlugin(Star):
             self._save()
 
     def invest_summary(self, force: bool = False,
-                       with_stance: bool = True) -> dict[str, Any]:
-        self._invest_refresh(force=force)
+                       with_stance: bool = True,
+                       refresh: bool = True) -> dict[str, Any]:
+        if refresh:
+            self._invest_refresh(force=force)
         summary = pf.summarize(self._positions(), self._fx())
         equity = round(self._ledger.balance + summary["total_value"], 2)
         summary["equity"] = equity
         summary["cash"] = round(self._ledger.balance, 2)
         if with_stance:
             try:
-                summary["stance"] = (self.market_stance() or {}).get("stance") or ""
+                try:
+                    stance_row = self.market_stance(refresh=refresh)
+                except TypeError:
+                    stance_row = self.market_stance()
+                summary["stance"] = (stance_row or {}).get("stance") or ""
             except Exception:
                 summary["stance"] = ""
         summary["leek"] = dict(self._state.get("invest_leek") or {})
@@ -1064,7 +1070,7 @@ class AmoFinancePlugin(Star):
     def _today(self) -> str:
         return date.today().isoformat()
 
-    def market_stance(self) -> dict[str, Any]:
+    def market_stance(self, refresh: bool = True) -> dict[str, Any]:
         """今天她是什么「韭菜状态」：过度自信 / 死扛 / 正常。
 
         一旦当天触发过就锁住：上午跌 4% 死扛，下午涨回来也还是死扛——
@@ -1074,7 +1080,10 @@ class AmoFinancePlugin(Star):
         record = self._state.get("invest_stance")
         if isinstance(record, dict) and record.get("date") == today:
             return record
-        signal = self.mood_signal()
+        try:
+            signal = self.mood_signal(refresh=refresh)
+        except TypeError:
+            signal = self.mood_signal()
         pct = float(signal.get("day_pnl_pct") or 0)
         stance = ""
         if pct >= self.LEEK_UP_PCT:
@@ -1192,14 +1201,14 @@ class AmoFinancePlugin(Star):
                 logger.info("[amo_fin] 模拟交易：%s %s（%s）"
                             % (item.get("action"), item.get("symbol"), item.get("why") or ""))
 
-    def mood_signal(self) -> dict[str, Any]:
+    def mood_signal(self, refresh: bool = True) -> dict[str, Any]:
         """今天的盈亏，给终端拿去影响心情。
 
         **只看持仓的行情波动**（`summary["day_pnl"]` = 现价 vs 昨收），
         绝不拿「权益 − 开盘权益」算：那里面混着现金，用户一转钱就会
         被误判成股市大涨（曾把 7150 借款算成 +24.54%、¥5985）。
         """
-        summary = self.invest_summary(with_stance=False)
+        summary = self.invest_summary(with_stance=False, refresh=refresh)
         day = self._state.get("invest_day") or {}
         base = float(day.get("open_value") or 0) if isinstance(day, dict) else 0.0
         day_pnl = round(float(summary.get("day_pnl") or 0), 2)
@@ -1426,7 +1435,7 @@ class AmoFinancePlugin(Star):
             state = getattr(companion, "state", None)
             if state is None:
                 return
-            snap = self.snapshot()
+            snap = self.snapshot(refresh=False)
             state.finance = {
                 "balance": snap["balance"],
                 "fixed_total": snap["fixed_total"],
@@ -1444,7 +1453,7 @@ class AmoFinancePlugin(Star):
     @filter.command("money", alias={"钱包", "余额"})
     async def cmd_money(self, event: AstrMessageEvent):
         """/money：看她还有多少钱。"""
-        snap = self.snapshot()
+        snap = await asyncio.to_thread(self.snapshot)
         fixed = "、".join("%s %d" % (i["name"], i["amount"]) for i in snap["fixed"][:4])
         yield event.plain_result(
             "余额 %.2f｜储蓄 %.2f｜本月已花 %.2f\n固定支出 %.2f（%s）"
@@ -1662,17 +1671,31 @@ class AmoFinancePlugin(Star):
         city = self._city()
         data = self._data()
         weather = ""
+        place = ""
         try:
             companion = self._companion()
             state = getattr(companion, "state", None)
             weather = str(((getattr(state, "weather", None) or {}) or {}).get("text") or "")
+            activity = getattr(state, "activity", None) or {}
+            if callable(getattr(state, "current_activity", None)):
+                activity = state.current_activity() or activity
+            place = str((activity or {}).get("place") or "")
         except Exception:
             weather = ""
+            place = ""
+        at_home = any(word in place for word in ("家", "小窝", "住处", "公寓", "宿舍", "卧室"))
         switched = ""
         if mode == "auto":
             cookable = dish in _ledger_mod.RECIPES
             orderable = dish in _ledger_mod.READY_FOODS
-            if cookable and orderable:
+            if not at_home and orderable:
+                mode = "order"
+                switched = "现在在外面（%s），点外卖" % (place or "外面")
+            elif not at_home and cookable:
+                return {"ok": False, "code": "not_home", "dish": dish,
+                        "reason": "在外面做不了%s，得回家或点外卖" % dish,
+                        "switched": "现在在外面（%s）" % (place or "外面")}
+            elif cookable and orderable:
                 cook_cost = _ledger_mod.recipe_cost(dish, city, weather)
                 order_price = _ledger_mod.ready_price(dish, self._prices(), city)
                 if order_price > 0 and cook_cost <= order_price:
@@ -1690,6 +1713,10 @@ class AmoFinancePlugin(Star):
                 mode = "order"
             else:
                 return {"ok": False, "code": "unknown", "reason": "菜单里没有这道菜"}
+        if mode == "cook" and not at_home:
+            return {"ok": False, "code": "not_home", "dish": dish,
+                    "reason": "在外面做不了%s，得回家或点外卖" % dish,
+                    "switched": "现在在外面（%s）" % (place or "外面")}
         if mode in ("cook", "order"):
             cookable = dish in _ledger_mod.RECIPES
             orderable = dish in _ledger_mod.READY_FOODS
@@ -1701,6 +1728,10 @@ class AmoFinancePlugin(Star):
                     switched = "做饭约 %.1f 元，外卖 %.1f 元，改点外卖" % (
                         cook_cost, order_price)
             elif mode == "order" and not orderable and cookable:
+                if not at_home:
+                    return {"ok": False, "code": "not_home", "dish": dish,
+                            "reason": "外卖没有%s，在外面也做不了，得回家" % dish,
+                            "switched": "现在在外面（%s）" % (place or "外面")}
                 mode = "cook"
                 switched = "外卖没有%s，改自己做" % dish
         cost = 0.0
@@ -1860,7 +1891,7 @@ class AmoFinancePlugin(Star):
 
     async def api_status(self):
         self.ensure_tick_task()
-        snap = self.snapshot()
+        snap = await asyncio.to_thread(self.snapshot)
         return self._json({"code": 0, "data": {
             "name": PLUGIN_NAME, "version": PLUGIN_VERSION, "display_name": DISPLAY_NAME,
             "link": _link_probe(self),
@@ -1872,7 +1903,7 @@ class AmoFinancePlugin(Star):
             "anxiety": snap["anxiety"], "own_house": snap["own_house"],
             "own_car": snap["own_car"],
             "salary": snap.get("salary") or self.salary_info(),
-            "invest": snap.get("invest") or self.invest_summary(),
+            "invest": snap.get("invest") or {},
             "borrow": snap.get("borrow") or self.borrow_info(),
             "gift": snap.get("gift") or {},
             "repay": snap.get("repay") or {},
@@ -1898,7 +1929,8 @@ class AmoFinancePlugin(Star):
         """持仓与盈亏。带 ``refresh=1`` 会强制拉一次行情。"""
         data = await self._payload()
         force = bool(data.get("refresh"))
-        return self._json({"code": 0, "data": self.invest_summary(force=force)})
+        invest = await asyncio.to_thread(self.invest_summary, force)
+        return self._json({"code": 0, "data": invest})
 
     async def api_history(self):
         return self._json({"code": 0, "data": {"items": self.recent(100)}})
@@ -1919,7 +1951,8 @@ class AmoFinancePlugin(Star):
                     continue
         self._save()
         self._report_to_companion()
-        return self._json({"code": 0, "data": self.snapshot()})
+        snap = await asyncio.to_thread(self.snapshot)
+        return self._json({"code": 0, "data": snap})
 
     async def api_charge(self):
         data = await self._payload()

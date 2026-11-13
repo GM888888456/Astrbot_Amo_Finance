@@ -1,5 +1,11 @@
 # 更新日志
 
+## 2.1.0（并发修复 + 一个框 + 吃饭按日程）
+
+- 行情不再阻塞事件循环：tick/seed 走 `asyncio.to_thread`，`api_status`/`api_invest`/`api_assets`/`/money` 也走 `to_thread`；`snapshot`/`mood_signal` 支持 `refresh=False`，Amo 同步只读缓存。
+- 资产/工资合回一个框（内部左右分栏），二级页同样；医疗也是身体/治疗报价一个框。
+- `food_propose(auto)` 接入日程地点：在外面点外卖；只有家里能做的菜返回 `not_home`，回家再做。
+
 ## 2.0.0（资产/工资两列 + 双击二级页 + 做饭/外卖联动）
 
 - 钱包改名「资产」，资产在左、工资在右；有房/租房跟在资产标题后；房车设置独立。

@@ -77,6 +77,34 @@ class FakeBoard:
         return {k: dict(v) for k, v in self._quotes.items() if k in list(symbols)}
 
 
+class FakeCompanion:
+    def __init__(self, place):
+        self.state = type("S", (), {
+            "activity": {"place": place, "activity": "逛街"},
+            "weather": {"text": "雾"},
+        })()
+
+
+class FoodScheduleTests(unittest.TestCase):
+    def _plugin(self, place):
+        p = build(balance=100.0)
+        p._companion = lambda: FakeCompanion(place)
+        return p
+
+    def test_outside_auto_orders(self):
+        p = self._plugin("贵阳·商场")
+        res = p.food_propose("泡面", "auto")
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("method"), "order")
+        self.assertIn("在外面", str(res.get("switched") or ""))
+
+    def test_outside_cook_only_needs_home(self):
+        p = self._plugin("贵阳·商场")
+        res = p.food_propose("番茄炒蛋盖饭", "auto")
+        self.assertFalse(res.get("ok"), res)
+        self.assertEqual(res.get("code"), "not_home")
+
+
 class BankTests(unittest.TestCase):
     def test_savings_interest_once_a_day(self):
         p = build()

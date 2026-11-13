@@ -17,31 +17,34 @@
     </header>
 <div id="linkbar" style="margin:8px 0 4px;padding:8px 10px;border-radius:10px;background:rgba(128,128,128,.10);font-size:12px;line-height:1.6">连接状态：检查中…</div>
 
-    <div class="grid2 cards">
-      <div class="card">
-        <div class="card-title"><span>资产</span><span class="pill" id="levelPill">—</span></div>
-        <dl class="kv">
-          <dt>余额</dt><dd id="balance">—</dd>
-          <dt>储蓄</dt><dd id="savings">—</dd>
-          <dt>储蓄利息</dt><dd id="savingsRate">—</dd>
-          <dt>欠你</dt><dd id="owed">—</dd>
-          <dt>本月花</dt><dd id="spent">—</dd>
-          <dt>本月进</dt><dd id="earned">—</dd>
-          <dt>城市</dt><dd id="city">—</dd>
-        </dl>
-        <div class="meta" id="anxietyHint"></div>
-        <div class="hint" id="borrowHint">—</div>
+    <div class="card">
+      <div class="card-title"><span>资产</span><span class="pill" id="levelPill">—</span></div>
+      <div class="split">
+        <div class="col">
+          <div class="sub-title">钱包</div>
+          <dl class="kv">
+            <dt>余额</dt><dd id="balance">—</dd>
+            <dt>储蓄</dt><dd id="savings">—</dd>
+            <dt>储蓄利息</dt><dd id="savingsRate">—</dd>
+            <dt>欠你</dt><dd id="owed">—</dd>
+            <dt>本月花</dt><dd id="spent">—</dd>
+            <dt>本月进</dt><dd id="earned">—</dd>
+            <dt>城市</dt><dd id="city">—</dd>
+          </dl>
+        </div>
+        <div class="col">
+          <div class="sub-title">工资 <span class="hint" id="salarySource">—</span></div>
+          <dl class="kv">
+            <dt>月薪（税前）</dt><dd id="salaryGross">—</dd>
+            <dt>到手</dt><dd id="salaryNet">—</dd>
+            <dt>发薪日</dt><dd id="salaryDay">—</dd>
+          </dl>
+          <div class="meta">自动：人格里有就用，没有按城市平均。</div>
+        </div>
       </div>
-
-      <div class="card">
-        <div class="card-title"><span>工资</span><span class="hint" id="salarySource">—</span></div>
-        <dl class="kv">
-          <dt>月薪（税前）</dt><dd id="salaryGross">—</dd>
-          <dt>到手</dt><dd id="salaryNet">—</dd>
-          <dt>发薪日</dt><dd id="salaryDay">—</dd>
-        </dl>
-        <div class="meta">自动：人格里有就用，没有按城市平均；面板不再手填。</div>
-      </div>
+      <div class="meta" id="anxietyHint"></div>
+      <div class="hint" id="borrowHint">—</div>
+      <div class="meta">本行不提供贷款：你转给她的都算借款，她还你时记还款；借款不收利息，储蓄才有利息。</div>
     </div>
 
     <div class="card">
@@ -93,22 +96,34 @@
       <button class="btn" id="subClose">关闭</button>
     </div>
     <div class="sheet-body">
-      <div class="grid2 cards">
-        <div class="card">
-          <div class="card-title"><span>资产</span></div>
-          <dl class="kv">
-            <dt>余额</dt><dd id="subBalance">—</dd>
-            <dt>储蓄</dt><dd id="subSavings">—</dd>
-            <dt>欠你</dt><dd id="subOwed">—</dd>
-          </dl>
+      <div class="card">
+        <div class="card-title"><span>资产</span></div>
+        <div class="split">
+          <div class="col">
+            <div class="sub-title">钱包</div>
+            <dl class="kv">
+              <dt>余额</dt><dd id="subBalance">—</dd>
+              <dt>储蓄</dt><dd id="subSavings">—</dd>
+              <dt>欠你</dt><dd id="subOwed">—</dd>
+            </dl>
+          </div>
+          <div class="col">
+            <div class="sub-title">工资</div>
+            <dl class="kv">
+              <dt>税前</dt><dd id="subGross">—</dd>
+              <dt>到手</dt><dd id="subNet">—</dd>
+            </dl>
+          </div>
         </div>
-        <div class="card">
-          <div class="card-title"><span>工资</span></div>
-          <dl class="kv">
-            <dt>税前</dt><dd id="subGross">—</dd>
-            <dt>到手</dt><dd id="subNet">—</dd>
-          </dl>
-        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span>投资</span></div>
+        <dl class="kv">
+          <dt>总市值</dt><dd id="subInvestValue">—</dd>
+          <dt>浮动盈亏</dt><dd id="subInvestPnl">—</dd>
+          <dt>今日</dt><dd id="subInvestDay">—</dd>
+        </dl>
       </div>
       <div class="card">
         <div class="card-title"><span>今日菜价</span><span class="hint" id="subMarketHint">—</span></div>

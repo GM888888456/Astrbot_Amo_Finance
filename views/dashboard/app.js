@@ -136,6 +136,14 @@ async function openSubpage() {
     $("subGross").textContent = money(pay.gross);
     $("subNet").textContent = money(pay.net);
   }
+  if (d) {
+    const inv = d.invest || {};
+    const pnl = Number(inv.total_pnl || 0);
+    const day = Number(inv.day_pnl || 0);
+    $("subInvestValue").textContent = money(inv.total_value);
+    $("subInvestPnl").textContent = (pnl >= 0 ? "+" : "") + money(pnl);
+    $("subInvestDay").textContent = (day >= 0 ? "+" : "") + money(day);
+  }
   const m = await get("market");
   const prices = (m && m.prices) || {};
   const names = Object.keys(prices).sort();
