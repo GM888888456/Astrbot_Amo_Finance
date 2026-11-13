@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.0"
+PLUGIN_VERSION = "2.3.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -942,11 +942,36 @@ class AmoFinancePlugin(Star):
     # ------------------------------------------------------------------
 
     def _fx(self) -> dict[str, float]:
-        return {
-            "CNY": 1.0,
-            "HKD": self._float("fx_hkd", 0.92),
-            "USD": self._float("fx_usd", 7.15),
-        }
+        usd = self._float("fx_usd", 7.15)
+        hkd = self._float("fx_hkd", 0.92)
+        # 每天抓一次实时汇率；抓不到就用配置值，绝不因为网络挂掉
+        if not self._bool("fx_live_fetch", True):
+            return {"CNY": 1.0, "HKD": hkd, "USD": usd}
+        try:
+            from datetime import date as _date
+            day = _date.today().isoformat()
+            cache = self._state.get("fx_live") or {}
+            if isinstance(cache, dict) and str(cache.get("day") or "") == day:
+                usd = float(cache.get("USD") or usd)
+                hkd = float(cache.get("HKD") or hkd)
+            else:
+                import json as _json
+                import urllib.request as _url
+                with _url.urlopen(
+                        "https://api.frankfurter.app/latest?from=USD&to=CNY,HKD",
+                        timeout=3) as resp:
+                    data = _json.loads(resp.read().decode("utf-8") or "{}")
+                rates = (data or {}).get("rates") or {}
+                if rates.get("CNY"):
+                    usd = float(rates["CNY"])
+                if rates.get("HKD"):
+                    # frankfurter 给的是 USD→HKD，换算成 HKD→CNY
+                    hkd = round(usd / float(rates["HKD"]), 4)
+                self._state["fx_live"] = {"day": day, "USD": usd, "HKD": hkd}
+                self._save()
+        except Exception as exc:
+            logger.debug("[amo_fin] 实时汇率抓取失败，用配置值: %s" % exc)
+        return {"CNY": 1.0, "HKD": hkd, "USD": usd}
 
     def fx_rate(self, currency: str) -> float:
         """港币/美元折人民币的汇率：给聊天里的「[转账]100 USD」用。"""
@@ -983,6 +1008,26 @@ class AmoFinancePlugin(Star):
         if not isinstance(positions, dict):
             positions = {}
             invest["positions"] = positions
+        # 老数据：成本还按美元记的，加载时折成人民币，只迁一次
+        fx = self._fx()
+        fixed = False
+        for pos in positions.values():
+            if not isinstance(pos, dict):
+                continue
+            currency = str(pos.get("currency") or "CNY")
+            if currency == "CNY" or pos.get("cost_cny"):
+                continue
+            rate = float(fx.get(currency, 1.0) or 1.0)
+            pos["cost"] = round(float(pos.get("cost") or 0) * rate, 2)
+            pos["cost_cny"] = True
+            fixed = True
+        if fixed:
+            logger.info("[amo_fin] 美股/港股成本已折算成人民币（%d 只）" %
+                        len([p for p in positions.values() if p.get("cost_cny")]))
+            try:
+                self._save()
+            except Exception:
+                pass
         return positions
 
     def _invest_refresh(self, force: bool = False) -> None:
@@ -1072,6 +1117,13 @@ class AmoFinancePlugin(Star):
         check = pf.can_buy(qty, price, cash, market)
         if not check.get("ok"):
             return check
+        # 成本统一折人民币：之前美股按美元记账、市值按人民币算，盈亏会虚高约 7 倍
+        currency = str(data.get("currency") or market_mod.currency_of(code) or "CNY")
+        rate = float(self._fx().get(currency, 1.0) or 1.0)
+        cost_cny = round(float(check["cost"]) * rate, 2)
+        if cost_cny > cash + 0.001:
+            return {"ok": False, "reason": "余额不够", "need": cost_cny,
+                    "short": round(cost_cny - cash, 2)}
         # 单只上限跟配置走：激进模式放得更宽，但仍有顶
         summary = self.invest_summary()
         equity = max(summary["equity"], 1.0)
@@ -1083,14 +1135,14 @@ class AmoFinancePlugin(Star):
         holding = self._positions().get(code) or {}
         rate = float(self._fx().get(str(holding.get("currency") or "CNY"), 1.0) or 1.0)
         held_value = float(holding.get("qty") or 0) * float(holding.get("last") or price) * rate
-        after = held_value + check["cost"]
+        after = held_value + cost_cny
         if after / equity > self._max_weight() + 0.001:
             return {"ok": False, "reason": "这只占得太多了，别一把梭",
                     "limit": round(equity * self._max_weight(), 2)}
         result = self._ledger.apply(
-            check["cost"], "transfer_out",
+            cost_cny, "transfer_out",
             reason="买入 %s %d 股" % (data.get("name") or code, qty),
-            from_savings=float(check["cost"]) > float(self._ledger.balance) + 0.001,
+            from_savings=cost_cny > float(self._ledger.balance) + 0.001,
         )
         if not result.get("ok"):
             return result
@@ -1100,19 +1152,20 @@ class AmoFinancePlugin(Star):
             pos = {"symbol": code, "name": data.get("name") or code,
                    "qty": 0, "cost": 0.0, "last": price,
                    "prev_close": data.get("prev_close"),
-                   "currency": data.get("currency") or "CNY"}
+                   "currency": currency, "cost_cny": True}
             positions[code] = pos
         pos["qty"] = int(pos.get("qty") or 0) + qty
-        pos["cost"] = round(float(pos.get("cost") or 0) + check["cost"], 2)
+        pos["cost"] = round(float(pos.get("cost") or 0) + cost_cny, 2)
+        pos["cost_cny"] = True
         pos["last"] = price
         pos["prev_close"] = data.get("prev_close")
         self._state.setdefault("invest_history", []).append({
             "action": "buy", "symbol": code, "name": data.get("name"),
-            "qty": qty, "price": price, "amount": check["cost"], "ts": _now(),
+            "qty": qty, "price": price, "amount": cost_cny, "ts": _now(),
         })
         del self._state["invest_history"][:-200]
         self._log({
-            "kind": "stock_buy", "amount": check["cost"],
+            "kind": "stock_buy", "amount": cost_cny,
             "reason": "买入 %s %d 股" % (data.get("name") or code, qty),
             "symbol": code, "qty": qty, "price": price,
             "balance": result.get("balance"),
@@ -1120,7 +1173,7 @@ class AmoFinancePlugin(Star):
         self._save()
         self._report_to_companion()
         return {"ok": True, "symbol": code, "name": data.get("name"), "qty": qty,
-                "price": price, "cost": check["cost"],
+                "price": price, "cost": cost_cny,
                 "balance": round(self._ledger.balance, 2),
                 "savings": round(float(self._ledger.savings or 0), 2)}
 
@@ -1142,8 +1195,10 @@ class AmoFinancePlugin(Star):
         check = pf.can_sell(int(qty or 0), holding, price, market)
         if not check.get("ok"):
             return check
+        rate = float(self._fx().get(str(pos.get("currency") or "CNY"), 1.0) or 1.0)
+        proceeds_cny = round(float(check["proceeds"]) * rate, 2)
         result = self._ledger.apply(
-            check["proceeds"], "refund",
+            proceeds_cny, "refund",
             reason="卖出 %s %d 股" % (pos.get("name") or code, int(qty)),
         )
         if not result.get("ok"):
@@ -1158,21 +1213,21 @@ class AmoFinancePlugin(Star):
             positions.pop(code, None)
         self._state.setdefault("invest_history", []).append({
             "action": "sell", "symbol": code, "name": pos.get("name"),
-            "qty": qty, "price": price, "amount": check["proceeds"], "ts": _now(),
+            "qty": qty, "price": price, "amount": proceeds_cny, "ts": _now(),
         })
         del self._state["invest_history"][:-200]
         self._log({
-            "kind": "stock_sell", "amount": check["proceeds"],
+            "kind": "stock_sell", "amount": proceeds_cny,
             "reason": "卖出 %s %d 股" % (pos.get("name") or code, qty),
             "symbol": code, "qty": qty, "price": price,
             "cost": round(avg_cost * qty, 2),
-            "pnl": round(check["proceeds"] - avg_cost * qty, 2),
+            "pnl": round(proceeds_cny - avg_cost * qty, 2),
             "balance": result.get("balance"),
         })
         self._save()
         self._report_to_companion()
         return {"ok": True, "symbol": code, "name": pos.get("name"), "qty": qty,
-                "price": price, "proceeds": check["proceeds"],
+                "price": price, "proceeds": proceeds_cny,
                 "balance": round(self._ledger.balance, 2)}
 
     def _seed_invest_once(self) -> None:

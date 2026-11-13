@@ -154,7 +154,8 @@ class BankTests(unittest.TestCase):
 
     def test_fx_rate(self):
         p = build()
-        p.config = {"fx_usd": 7.2, "fx_hkd": 0.9}
+        # 离线：测试不依赖网络汇率
+        p.config = {"fx_usd": 7.2, "fx_hkd": 0.9, "fx_live_fetch": False}
         self.assertAlmostEqual(p.fx_rate("USD"), 7.2)
         self.assertAlmostEqual(p.fx_rate("HKD"), 0.9)
         self.assertAlmostEqual(p.fx_rate("CNY"), 1.0)
