@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.9"
+PLUGIN_VERSION = "2.4.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -229,12 +229,19 @@ class AmoFinancePlugin(Star):
                     inst = obj() if isinstance(obj, type) else obj
                     break
                 items = getattr(inst, "items", None) if inst is not None else None
+                takeout = {}
                 if callable(items):
                     for row in items("groceries") or []:
                         name = str(row.get("name") or "")
                         price = float(row.get("price") or 0)
                         if name and price > 0:
                             prices[name] = price
+                    for row in items("takeout") or []:
+                        name = str(row.get("name") or "")
+                        price = float(row.get("price") or 0)
+                        if name and price > 0:
+                            takeout[name] = price
+                    _ledger_mod.set_market_takeout(takeout)
                     break
         except Exception as exc:
             logger.debug("[amo_fin] 同步市场价失败: %s" % exc)

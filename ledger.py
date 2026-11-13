@@ -558,11 +558,19 @@ def _groceries():
 #: 市场（Astrbot_Amo_Marketplace）当天的菜价，按名字覆盖内置表
 MARKET_PRICES: dict[str, float] = {}
 
+#: 市场外卖当天价（菜名 → 价格）
+MARKET_TAKEOUT: dict[str, float] = {}
+
 
 def set_market_prices(prices: dict[str, float] | None) -> None:
     """把市场当日菜价灌进来；空字典表示清掉。"""
     global MARKET_PRICES
     MARKET_PRICES = {str(k): float(v) for k, v in (prices or {}).items() if v}
+
+
+def set_market_takeout(prices: dict[str, float] | None) -> None:
+    global MARKET_TAKEOUT
+    MARKET_TAKEOUT = {str(k): float(v) for k, v in (prices or {}).items() if v}
 
 
 def ingredient_price(item: str, city: str = "", weather: str = "",
@@ -585,7 +593,9 @@ def ingredient_price(item: str, city: str = "", weather: str = "",
 
 
 def ready_price(name: str, prices: dict[str, float], city: str = "") -> float:
-    """一份现成的饭多少钱。价格表里没有就用内置默认。"""
+    """一份现成的饭多少钱。价格表里没有就用内置默认；市场有同名外卖就用市场价。"""
+    if str(name or "") in MARKET_TAKEOUT:
+        return round(float(MARKET_TAKEOUT[str(name)]), 2)
     spec = READY_FOODS.get(str(name or ""))
     if not spec:
         return 0.0
