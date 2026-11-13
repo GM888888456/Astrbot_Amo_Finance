@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.3.6"
+PLUGIN_VERSION = "2.3.7"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1053,6 +1053,7 @@ class AmoFinancePlugin(Star):
                        refresh: bool = True) -> dict[str, Any]:
         try:
             self._repair_fx_underpaid()
+            self._backfill_fx_flow()
         except Exception as exc:
             logger.debug("[amo_fin] 汇率差额补扣失败: %s" % exc)
         if refresh:
@@ -1099,6 +1100,33 @@ class AmoFinancePlugin(Star):
                 "cash": round(cash, 2), "equity": round(equity, 2),
                 "owed": round(self._ledger.owed_to_user, 2)}
 
+    def _backfill_fx_flow(self) -> None:
+        """补扣做过了但流水没记的，补一条（只补一次，按理由判重）。"""
+        positions = self._positions()
+        history = self._state.get("invest_history") or []
+        reasons = " ".join(str(row.get("reason") or "") for row in self._history)
+        for code, pos in list(positions.items()):
+            if not isinstance(pos, dict) or not pos.get("fx_settled"):
+                continue
+            name = pos.get("name") or code
+            if ("补扣：" + name) in reasons:
+                continue
+            cost = float(pos.get("cost") or 0)
+            paid = 0.0
+            for row in history:
+                if (str(row.get("symbol") or "") == str(code)
+                        and str(row.get("action") or "") == "buy"):
+                    paid += float(row.get("amount") or 0)
+            owed = round(cost - paid, 2)
+            if owed <= 1.0:
+                continue
+            self._log({
+                "kind": "expense", "amount": owed,
+                "reason": "补扣：%s 买入汇率差额" % name,
+                "balance": round(float(self._ledger.balance), 2),
+            })
+            self._save()
+
     def _repair_fx_underpaid(self) -> None:
         """把历史美股/港股「按原币扣了人民币」的差额补扣掉。
 
@@ -1133,6 +1161,12 @@ class AmoFinancePlugin(Star):
             if result.get("ok"):
                 pos["fx_settled"] = True
                 fixed.append((code, owed, from_savings))
+                # 流水也要留下这一笔，不然账扣了、面板看不到
+                self._log({
+                    "kind": "expense", "amount": owed,
+                    "reason": "补扣：%s 买入汇率差额" % (pos.get("name") or code),
+                    "balance": result.get("balance"),
+                })
         if fixed:
             for code, owed, saved in fixed:
                 logger.info("[amo_fin] 补扣汇率差额 %s：%.2f（%s）" %
