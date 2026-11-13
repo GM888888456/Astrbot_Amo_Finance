@@ -423,6 +423,10 @@ def monthly_fixed(ledger: Ledger, prices: dict[str, float], city: str = "") -> l
     elif not ledger.own_house:
         items.append({"name": "房租", "amount": float(profile["rent"]), "tier": "core"})
 
+    # 订阅会员：视频、音乐（按月，价格可在 prices 里改）
+    items.append({"name": "视频会员", "amount": float(prices.get("视频会员", 25)), "tier": "core"})
+    items.append({"name": "音乐会员", "amount": float(prices.get("音乐会员", 15)), "tier": "core"})
+
     # 物业水电燃气网费：不论自有还是租，都要交
     items.append({"name": "物业", "amount": float(prices.get("物业", 300)), "tier": "core"})
     items.append({"name": "水电", "amount": float(prices.get("水电", 180)), "tier": "event"})
