@@ -338,10 +338,10 @@ READY_FOODS: dict[str, dict[str, Any]] = {
 
 #: 饮品。水是家里烧的，不要钱；奶茶是真的花钱。
 DRINKS: dict[str, dict[str, Any]] = {
-    "水": {"price_key": "", "price": 0.0, "hydration": 15, "satiety": 0, "note": "自己烧的"},
-    "矿泉水": {"price_key": "", "price": 2.0, "hydration": 20, "satiety": 0, "note": "楼下小卖部"},
-    "奶茶": {"price_key": "奶茶", "hydration": 12, "satiety": 10, "note": "七分糖"},
-    "咖啡": {"price_key": "咖啡", "hydration": 8, "satiety": 5, "note": "续命"},
+    "水": {"price_key": "", "price": 0.0, "hydration": 25, "satiety": 0, "note": "自己烧的"},
+    "矿泉水": {"price_key": "", "price": 2.0, "hydration": 30, "satiety": 0, "note": "楼下小卖部"},
+    "奶茶": {"price_key": "奶茶", "hydration": 18, "satiety": 10, "note": "七分糖"},
+    "咖啡": {"price_key": "咖啡", "hydration": 12, "satiety": 5, "note": "续命"},
 }
 
 #: 食材单价（元/斤，二线基准）。这是**兜底价**：装得到 groceries.py 就用它按

@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.1.3"
+PLUGIN_VERSION = "2.1.4"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1684,6 +1684,8 @@ class AmoFinancePlugin(Star):
             weather = ""
             place = ""
         at_home = any(word in place for word in ("家", "小窝", "住处", "公寓", "宿舍", "卧室"))
+        if mode == "auto" and dish in _ledger_mod.DRINKS:
+            mode = "drink"
         switched = ""
         if mode == "auto":
             cookable = dish in _ledger_mod.RECIPES

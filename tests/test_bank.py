@@ -91,6 +91,13 @@ class FoodScheduleTests(unittest.TestCase):
         p._companion = lambda: FakeCompanion(place)
         return p
 
+    def test_auto_recognizes_drink(self):
+        p = build(balance=100.0)
+        res = p.food_propose("水", "auto")
+        self.assertTrue(res.get("ok"), res)
+        self.assertEqual(res.get("method"), "drink")
+        self.assertEqual(res.get("hydration"), 25)
+
     def test_outside_auto_orders(self):
         p = self._plugin("贵阳·商场")
         res = p.food_propose("泡面", "auto")

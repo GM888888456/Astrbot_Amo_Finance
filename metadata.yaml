@@ -2,7 +2,7 @@ name: Astrbot_Amo_Finance
 display_name: 我想永远陪着你-金融
 desc: 我想永远陪着你-金融：账本、资产、收支、个税社保、月度结算，给终端提供 charge/income/balance 三个入口
 short_desc: 我想永远陪着你-金融
-version: 2.1.3
+version: 2.1.4
 author: 墨辞烟
 astrbot_version: ">=4.5.7"
 repo: https://github.com/GM888888456/Astrbot_Amo_Finance/
