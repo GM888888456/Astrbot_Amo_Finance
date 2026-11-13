@@ -73,7 +73,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.2.6"
+PLUGIN_VERSION = "2.2.7"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -189,15 +189,20 @@ class AmoFinancePlugin(Star):
 
     def _max_weight(self) -> float:
         # 老板要求：激进模式单只可以到 100%，敢把储蓄金也压进去
-        default = 1.0 if self._aggressive() else pf.MAX_WEIGHT
+        if self._aggressive():
+            # 配置里可能还存着老的 0.6，激进模式下直接压到 100%
+            return 1.0
+        default = pf.MAX_WEIGHT
         try:
             value = float(self._cfg("invest_max_weight", default) or default)
         except Exception:
             value = default
-        return max(0.10, min(1.0, value))
+        return max(0.10, min(0.95, value))
 
     def _max_positions(self) -> int:
-        default = 10 if self._aggressive() else pf.MAX_POSITIONS
+        if self._aggressive():
+            return 10  # 老配置里的 6 不再生效
+        default = pf.MAX_POSITIONS
         try:
             value = int(float(self._cfg("invest_max_positions", default) or default))
         except Exception:
