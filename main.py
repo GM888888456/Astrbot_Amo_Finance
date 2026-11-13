@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.9.2"
+PLUGIN_VERSION = "1.9.3"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -808,16 +808,18 @@ class AmoFinancePlugin(Star):
         if changed:
             self._save()
 
-    def invest_summary(self, force: bool = False) -> dict[str, Any]:
+    def invest_summary(self, force: bool = False,
+                       with_stance: bool = True) -> dict[str, Any]:
         self._invest_refresh(force=force)
         summary = pf.summarize(self._positions(), self._fx())
         equity = round(self._ledger.balance + summary["total_value"], 2)
         summary["equity"] = equity
         summary["cash"] = round(self._ledger.balance, 2)
-        try:
-            summary["stance"] = (self.market_stance() or {}).get("stance") or ""
-        except Exception:
-            summary["stance"] = ""
+        if with_stance:
+            try:
+                summary["stance"] = (self.market_stance() or {}).get("stance") or ""
+            except Exception:
+                summary["stance"] = ""
         summary["leek"] = dict(self._state.get("invest_leek") or {})
         summary["bankrupt"] = self._bankrupt_from(summary)
         summary["aggressive"] = self._aggressive()
@@ -1103,10 +1105,15 @@ class AmoFinancePlugin(Star):
         self._invest_refresh()
         today = date.today().isoformat()
         day = self._state.get("invest_day")
-        if not isinstance(day, dict) or day.get("date") != today:
-            # 记今天的开盘权益，用来算「今天赚了还是亏了」
-            equity = self._ledger.balance + pf.summarize(self._positions(), self._fx())["total_value"]
-            self._state["invest_day"] = {"date": today, "open": round(equity, 2)}
+        if (not isinstance(day, dict) or day.get("date") != today
+                or "open_value" not in day):
+            # 只记「开盘持仓市值」：权益里含现金，转账/还款/工资一进来就会被
+            # 当成炒股盈利，之前就是这么把 7150 借款算成 +24.54% 的。
+            summary = pf.summarize(self._positions(), self._fx())
+            open_value = round(max(0.0, summary["total_value"] - summary["day_pnl"]), 2)
+            self._state["invest_day"] = {
+                "date": today, "open": open_value, "open_value": open_value,
+            }
             self._save()
         stance = str((self.market_stance() or {}).get("stance") or "")
         try:
@@ -1144,13 +1151,20 @@ class AmoFinancePlugin(Star):
                             % (item.get("action"), item.get("symbol"), item.get("why") or ""))
 
     def mood_signal(self) -> dict[str, Any]:
-        """今天的盈亏，给终端拿去影响心情。"""
-        summary = self.invest_summary()
+        """今天的盈亏，给终端拿去影响心情。
+
+        **只看持仓的行情波动**（`summary["day_pnl"]` = 现价 vs 昨收），
+        绝不拿「权益 − 开盘权益」算：那里面混着现金，用户一转钱就会
+        被误判成股市大涨（曾把 7150 借款算成 +24.54%、¥5985）。
+        """
+        summary = self.invest_summary(with_stance=False)
         day = self._state.get("invest_day") or {}
-        base = float(day.get("open") or 0) if isinstance(day, dict) else 0.0
+        base = float(day.get("open_value") or 0) if isinstance(day, dict) else 0.0
+        day_pnl = round(float(summary.get("day_pnl") or 0), 2)
+        if base <= 0:
+            base = round(float(summary.get("total_value") or 0) - day_pnl, 2)
+        pct = round(day_pnl / base * 100.0, 2) if base > 0 else 0.0
         equity = summary["equity"]
-        day_pnl = round(equity - base, 2) if base else summary["day_pnl"]
-        pct = round(day_pnl / base * 100.0, 2) if base else 0.0
         return {
             "day_pnl": day_pnl,
             "day_pnl_pct": pct,

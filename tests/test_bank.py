@@ -31,6 +31,52 @@ def build(balance=10000.0, savings=30000.0, owed=0.0, state=None):
     return p
 
 
+class FakeBoard:
+    def __init__(self, quotes):
+        self._quotes = quotes
+
+    def quotes(self, symbols, force=False):
+        return {k: dict(v) for k, v in self._quotes.items() if k in list(symbols)}
+
+
+class MoodTests(unittest.TestCase):
+    def _with_position(self):
+        p = build(balance=10000.0)
+        p._state["invest"] = {"positions": {
+            "sh600519": {"symbol": "sh600519", "name": "贵州茅台", "qty": 100,
+                         "cost": 10000.0, "last": 110.0, "prev_close": 100.0,
+                         "currency": "CNY"}}}
+        p._state["invest_day"] = {"date": date.today().isoformat(),
+                                  "open": 10000.0, "open_value": 10000.0}
+        p._quote_board = FakeBoard({"sh600519": {
+            "symbol": "sh600519", "name": "贵州茅台", "price": 110.0,
+            "prev_close": 100.0, "change": 10.0, "pct": 10.0, "currency": "CNY"}})
+        return p
+
+    def test_day_pnl_is_market_only(self):
+        p = self._with_position()
+        sig = p.mood_signal()
+        self.assertAlmostEqual(sig["day_pnl"], 1000.0, places=2)
+        self.assertAlmostEqual(sig["day_pnl_pct"], 10.0, places=2)
+
+    def test_deposit_does_not_change_day_pnl(self):
+        """他转钱进来不能被算成股市盈利（曾把 7150 算成 +24.54%）。"""
+        p = self._with_position()
+        before = p.mood_signal()
+        p.borrow(5000)
+        after = p.mood_signal()
+        self.assertAlmostEqual(after["day_pnl"], before["day_pnl"], places=2)
+        self.assertAlmostEqual(after["day_pnl_pct"], before["day_pnl_pct"], places=2)
+
+
+class FakeBoard:
+    def __init__(self, quotes):
+        self._quotes = quotes
+
+    def quotes(self, symbols, force=False):
+        return {k: dict(v) for k, v in self._quotes.items() if k in list(symbols)}
+
+
 class BankTests(unittest.TestCase):
     def test_savings_interest_once_a_day(self):
         p = build()
@@ -48,6 +94,28 @@ class BankTests(unittest.TestCase):
         self.assertLess(p._ledger.owed_to_user, 3000.0)
         self.assertEqual(p._history[-1]["kind"], "repay")
         self.assertEqual(p._auto_repay(), 0.0)   # 一天只还一次
+
+    def test_deposit_does_not_count_as_market_gain(self):
+        """用户转钱不是炒股盈利：当日盈亏只看现价 vs 昨收。"""
+        p = build(balance=10000.0)
+        today = date.today().isoformat()
+        p._state["invest"] = {"positions": {
+            "sh600519": {"symbol": "sh600519", "name": "贵州茅台", "qty": 100,
+                         "cost": 10000.0, "last": 110.0, "prev_close": 100.0,
+                         "currency": "CNY"}}}
+        p._state["invest_day"] = {"date": today, "open": 10000.0,
+                                  "open_value": 10000.0}
+        p._state["invest_stance"] = {"date": today, "stance": "", "pct": 0}
+        p._quote_board = FakeBoard({"sh600519": {
+            "symbol": "sh600519", "name": "贵州茅台", "price": 110.0,
+            "prev_close": 100.0, "currency": "CNY"}})
+        before = p.mood_signal()
+        self.assertAlmostEqual(before["day_pnl"], 1000.0, places=2)
+        self.assertAlmostEqual(before["day_pnl_pct"], 10.0, places=2)
+        p.borrow(5000)
+        after = p.mood_signal()
+        self.assertAlmostEqual(after["day_pnl"], before["day_pnl"], places=2)
+        self.assertAlmostEqual(after["day_pnl_pct"], before["day_pnl_pct"], places=2)
 
     def test_fx_rate(self):
         p = build()
