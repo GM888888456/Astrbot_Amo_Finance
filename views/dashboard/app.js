@@ -164,7 +164,19 @@ async function openSubpage() {
     ? ((f.city || "") + (f.level ? " · " + f.level : "")) : "读取失败";
 }
 
+$("subOpen").addEventListener("click", openSubpage);
 $("brandTitle").addEventListener("dblclick", openSubpage);
+let _lastBrandTap = 0;
+$("brandTitle").addEventListener("touchend", (ev) => {
+  const now = Date.now();
+  if (now - _lastBrandTap < 360) {
+    ev.preventDefault();
+    _lastBrandTap = 0;
+    openSubpage();
+    return;
+  }
+  _lastBrandTap = now;
+});
 $("subClose").addEventListener("click", () => { $("subpage").hidden = true; });
 
 $("saveAssets").addEventListener("click", async () => {

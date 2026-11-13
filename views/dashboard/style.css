@@ -306,11 +306,10 @@ textarea:focus { outline: none; border-color: var(--pink); }
 @media (max-width: 380px) { .grid2.cards { grid-template-columns: 1fr; } }
 
 /* 一个框内左右分栏：资产/工资、身体/治疗报价 */
-.split { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); gap: 10px; }
 .split > .col { min-width: 0; }
 .split > .col:last-child { border-left: 0; padding-left: 0; }
 .split .sub-title { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
-@media (max-width: 420px) {
-  .split { grid-template-columns: 1fr; }
-  .split > .col:last-child { border-left: 0; padding-left: 0; border-top: 0; padding-top: 0; }
-}
+.split .kv { grid-template-columns: 56px 1fr; font-size: 12px; }
+.head-actions { display: flex; align-items: center; gap: 8px; }
+.btn.ghost { background: var(--card); color: var(--pink); border: 1px solid var(--line); padding: 7px 11px; font-size: 12.5px; }
