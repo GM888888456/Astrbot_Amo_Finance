@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.9.1"
+PLUGIN_VERSION = "1.9.2"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -752,6 +752,14 @@ class AmoFinancePlugin(Star):
             "HKD": self._float("fx_hkd", 0.92),
             "USD": self._float("fx_usd", 7.15),
         }
+
+    def fx_rate(self, currency: str) -> float:
+        """港币/美元折人民币的汇率：给聊天里的「[转账]100 USD」用。"""
+        code = str(currency or "CNY").strip().upper()
+        try:
+            return float(self._fx().get(code, 1.0) or 1.0)
+        except Exception:
+            return 1.0
 
     def _watchlist(self) -> list[str]:
         raw = self._cfg("invest_watchlist", list(pf.DEFAULT_WATCHLIST))

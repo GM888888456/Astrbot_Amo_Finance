@@ -49,6 +49,13 @@ class BankTests(unittest.TestCase):
         self.assertEqual(p._history[-1]["kind"], "repay")
         self.assertEqual(p._auto_repay(), 0.0)   # 一天只还一次
 
+    def test_fx_rate(self):
+        p = build()
+        p.config = {"fx_usd": 7.2, "fx_hkd": 0.9}
+        self.assertAlmostEqual(p.fx_rate("USD"), 7.2)
+        self.assertAlmostEqual(p.fx_rate("HKD"), 0.9)
+        self.assertAlmostEqual(p.fx_rate("CNY"), 1.0)
+
     def test_auto_repay_skips_when_no_owed(self):
         p = build(balance=12000.0, owed=0.0)
         self.assertEqual(p._auto_repay(), 0.0)

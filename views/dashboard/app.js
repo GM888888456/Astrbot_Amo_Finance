@@ -76,7 +76,7 @@ async function loadStatus() {
     $("borrowHint").textContent = owed > 0
       ? ("她欠你 " + money(owed) + "；今天转账还可借 " + money(bor.transfer_left || 0) +
          "，红包剩 " + money(bor.red_left || 0))
-      : ("借钱给她：转账每天最多一万 / 红包单个最多 200（累计一万）。聊天里发「[转账]500」或「[红包]200」也可以。");
+      : ("私聊里发「[转账]500 元」或「[红包]200 元」（可带 USD / HKD）才算借款；转账每天最多一万，红包单个最多 200、累计一万。");
   }
 
   const inv = d.invest || {};
@@ -124,27 +124,6 @@ async function loadHistory() {
       sign + money(it.amount).slice(1) + "</span></li>";
   }).join("");
 }
-
-async function sendGift(kind) {
-  const isRed = kind === "red";
-  const input = isRed ? $("redInput") : $("transferInput");
-  const amount = Number(input.value || 0);
-  if (!amount || amount <= 0) { $("giftHint").textContent = "先填个金额"; return; }
-  $("giftHint").textContent = isRed ? "发红包中…" : "转账中…";
-  const res = await post("borrow", { amount: amount, kind: kind });
-  if (res && res.ok) {
-    $("giftHint").textContent = "已到账，她欠你 " + money(res.owed || 0) +
-      "。等她开口，会甜甜地谢你的。";
-    input.value = "";
-    loadStatus();
-    loadHistory();
-  } else {
-    $("giftHint").textContent = (res && res.reason) || "没成功，稍后再试";
-  }
-}
-
-$("transferBtn").addEventListener("click", () => sendGift("transfer"));
-$("redBtn").addEventListener("click", () => sendGift("red"));
 
 $("saveAssets").addEventListener("click", async () => {
   const body = {

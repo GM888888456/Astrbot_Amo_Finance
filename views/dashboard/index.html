@@ -51,24 +51,7 @@
       </dl>
       <ul class="list" id="positions"><li class="empty">还没有持仓</li></ul>
       <div class="meta" id="investMeta">模拟盘：行情来自腾讯公开接口。买卖是她自己的事，这里只看不管；成交会记进下面的流水。没钱了她会自己开口借。</div>
-      <div class="grid2">
-        <div class="field">
-          <label>[转账]</label>
-          <div class="row">
-            <input id="transferInput" type="number" min="0" step="100" placeholder="金额" />
-            <button class="btn" id="transferBtn">转</button>
-          </div>
-        </div>
-        <div class="field">
-          <label>[红包]</label>
-          <div class="row">
-            <input id="redInput" type="number" min="0" step="10" placeholder="金额" />
-            <button class="btn" id="redBtn">发</button>
-          </div>
-        </div>
-      </div>
-      <span class="hint" id="giftHint"></span>
-      <div class="meta">这两笔都算她欠你的（转账每天最多一万；红包单个最多 200、累计一万）。她收到会高兴，也会记着要还。</div>
+      <div class="meta">在私聊里发「[转账]500 元」或「[红包]200 元」；也可以写 USD / HKD，会按汇率折成人民币记账。都算她欠你的（转账每天最多一万；红包单个最多 200、累计一万）。</div>
     </div>
 
     <div class="card">
@@ -78,11 +61,17 @@
 
     <div class="card">
       <div class="card-title"><span>资产</span></div>
-      <label class="check"><input type="checkbox" id="own_house" /> 名下有房（不扣房租）</label>
-      <label class="check"><input type="checkbox" id="own_car" /> 名下有车（不扣车贷）</label>
       <div class="grid2">
-        <div class="field"><label>房贷月供</label><input id="mortgage" type="number" min="0" /></div>
-        <div class="field"><label>车贷月供</label><input id="car_loan" type="number" min="0" /></div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="own_house" /> 名下有房</label>
+          <input id="mortgage" type="number" min="0" placeholder="房贷月供" />
+          <span class="hint">有房不扣房租，房贷照扣</span>
+        </div>
+        <div class="field">
+          <label class="check"><input type="checkbox" id="own_car" /> 名下有车</label>
+          <input id="car_loan" type="number" min="0" placeholder="车贷月供" />
+          <span class="hint">有车不扣车贷，车险油费照扣</span>
+        </div>
       </div>
       <span class="hint" id="assetsHint">改完点右上角「保存」。</span>
     </div>
@@ -94,6 +83,6 @@
 
     <div class="foot">反馈群 1055679275</div>
   </div>
-  <script src="./app.js?v=1.9.0"></script>
+  <script src="./app.js?v=1.9.2"></script>
 </body>
 </html>
