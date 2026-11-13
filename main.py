@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "1.9.0"
+PLUGIN_VERSION = "1.9.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -290,6 +290,10 @@ class AmoFinancePlugin(Star):
         history = data.get("history")
         self._history = list(history) if isinstance(history, list) else []
         del self._history[:-HISTORY_LIMIT]
+        try:
+            self._backfill_stock_flow()
+        except Exception as exc:
+            logger.debug("[amo_fin] 股票流水回填失败: %s" % exc)
         # 首次安装：按配置给一笔起点，只做一次
         if not data and not self._state.get("inited"):
             self._ledger.balance = round(self._float("initial_balance", 8000.0), 2)
@@ -302,6 +306,42 @@ class AmoFinancePlugin(Star):
             self._log({"kind": "init", "amount": self._ledger.balance,
                        "reason": "初始化", "balance": self._ledger.balance})
             self._save()
+
+    def _backfill_stock_flow(self) -> None:
+        """1.9.1 之前股票买卖没写流水：把已有的补进来，只补一次。
+
+        银行要能查到每一笔：以后每笔买卖都会实时写；历史的那几笔在这里补齐。
+        """
+        if self._state.get("stock_flow_backfilled"):
+            return
+        rows = self._state.get("invest_history") or []
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            action = str(item.get("action") or "")
+            if action not in ("buy", "sell"):
+                continue
+            try:
+                ts = float(item.get("ts") or 0)
+                amount = float(item.get("amount") or 0)
+            except Exception:
+                continue
+            if amount <= 0:
+                continue
+            self._history.append({
+                "kind": "stock_buy" if action == "buy" else "stock_sell",
+                "amount": round(amount, 2),
+                "reason": ("买入 %s %d 股" if action == "buy" else "卖出 %s %d 股")
+                          % (item.get("name") or item.get("symbol"), int(item.get("qty") or 0)),
+                "symbol": item.get("symbol"), "qty": item.get("qty"),
+                "price": item.get("price"), "balance": None, "ts": ts,
+                "time": datetime.fromtimestamp(ts).strftime("%m-%d %H:%M"),
+                "backfilled": True,
+            })
+        self._history.sort(key=lambda row: float(row.get("ts") or 0))
+        del self._history[:-HISTORY_LIMIT]
+        self._state["stock_flow_backfilled"] = True
+        self._save()
 
     def _save(self) -> None:
         payload = {
@@ -426,6 +466,10 @@ class AmoFinancePlugin(Star):
             data["gift"] = self.money_gift()
         except Exception:
             data["gift"] = {}
+        try:
+            data["repay"] = self.money_repay()
+        except Exception:
+            data["repay"] = {}
         return data
 
     def recent(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -628,11 +672,39 @@ class AmoFinancePlugin(Star):
                 "owed": round(self._ledger.owed_to_user, 2),
                 "left": self.borrow_info()}
 
+    #: 还完钱之后多久内她还记得提一句
+    REPAY_NOTE_TTL = 900
+
+    def _note_repay(self, amount: float, remaining: float) -> None:
+        self._state["money_repay"] = {
+            "ts": _now(), "amount": round(float(amount or 0), 2),
+            "remaining": round(float(remaining or 0), 2),
+        }
+
+    def money_repay(self) -> dict[str, Any]:
+        """最近一次还款记录（15 分钟内有效），终端用它让她说「我还你钱了」。"""
+        note = self._state.get("money_repay")
+        if not isinstance(note, dict):
+            return {}
+        try:
+            age = _now() - float(note.get("ts") or 0)
+        except Exception:
+            age = 1e9
+        if age < 0 or age > self.REPAY_NOTE_TTL:
+            return {}
+        return {
+            "amount": round(float(note.get("amount") or 0), 2),
+            "remaining": round(float(note.get("remaining") or 0), 2),
+            "seconds": int(age),
+        }
+
     def repay(self, amount: float) -> dict[str, Any]:
         result = self._ledger.repay_user(amount)
         if result.get("ok"):
-            self._log({"kind": "repay", "amount": result["paid"],
-                       "balance": result.get("balance")})
+            self._log({"kind": "repay", "amount": result["paid"], "reason": "还他的钱",
+                       "balance": result.get("balance"),
+                       "remaining": result.get("remaining")})
+            self._note_repay(result["paid"], result.get("remaining"))
             self._save()
         return result
 
@@ -803,7 +875,7 @@ class AmoFinancePlugin(Star):
             return {"ok": False, "reason": "这只占得太多了，别一把梭",
                     "limit": round(equity * self._max_weight(), 2)}
         result = self._ledger.apply(
-            check["cost"], "expense",
+            check["cost"], "transfer_out",
             reason="买入 %s %d 股" % (data.get("name") or code, qty),
         )
         if not result.get("ok"):
@@ -825,6 +897,12 @@ class AmoFinancePlugin(Star):
             "qty": qty, "price": price, "amount": check["cost"], "ts": _now(),
         })
         del self._state["invest_history"][:-200]
+        self._log({
+            "kind": "stock_buy", "amount": check["cost"],
+            "reason": "买入 %s %d 股" % (data.get("name") or code, qty),
+            "symbol": code, "qty": qty, "price": price,
+            "balance": result.get("balance"),
+        })
         self._save()
         self._report_to_companion()
         return {"ok": True, "symbol": code, "name": data.get("name"), "qty": qty,
@@ -850,7 +928,7 @@ class AmoFinancePlugin(Star):
         if not check.get("ok"):
             return check
         result = self._ledger.apply(
-            check["proceeds"], "income",
+            check["proceeds"], "refund",
             reason="卖出 %s %d 股" % (pos.get("name") or code, int(qty)),
         )
         if not result.get("ok"):
@@ -868,6 +946,14 @@ class AmoFinancePlugin(Star):
             "qty": qty, "price": price, "amount": check["proceeds"], "ts": _now(),
         })
         del self._state["invest_history"][:-200]
+        self._log({
+            "kind": "stock_sell", "amount": check["proceeds"],
+            "reason": "卖出 %s %d 股" % (pos.get("name") or code, qty),
+            "symbol": code, "qty": qty, "price": price,
+            "cost": round(avg_cost * qty, 2),
+            "pnl": round(check["proceeds"] - avg_cost * qty, 2),
+            "balance": result.get("balance"),
+        })
         self._save()
         self._report_to_companion()
         return {"ok": True, "symbol": code, "name": pos.get("name"), "qty": qty,
@@ -1115,11 +1201,119 @@ class AmoFinancePlugin(Star):
             self._save()
 
         try:
+            interest = self._credit_savings_interest()
+            if interest > 0:
+                actions.append("利息")
+        except Exception as exc:
+            logger.warning("[amo_fin] 利息结算失败: %s" % exc)
+
+        try:
+            repaid = self._auto_repay()
+            if repaid > 0:
+                actions.append("还款")
+        except Exception as exc:
+            logger.warning("[amo_fin] 自动还款失败: %s" % exc)
+
+        try:
             self._invest_tick()
         except Exception as exc:
             logger.warning("[amo_fin] 投资结算失败: %s" % exc)
 
         return {"actions": actions, "today": today, "month": month}
+
+    # ------------------------------------------------------------------
+    # 银行：储蓄利息 / 自动还款
+    # ------------------------------------------------------------------
+
+    SAVINGS_RATE_DEFAULT = 1.5
+    REPAY_KEEP_MIN = 800.0
+    REPAY_RESERVE_EXTRA = 300.0
+    REPAY_DAY_MAX = 5000.0
+    REPAY_MIN = 50.0
+
+    def savings_rate(self) -> float:
+        """储蓄年化利率（%）。借款没有利息——情侣之间不收。"""
+        try:
+            value = float(self._cfg("savings_rate", self.SAVINGS_RATE_DEFAULT) or 0)
+        except Exception:
+            value = self.SAVINGS_RATE_DEFAULT
+        return max(0.0, min(10.0, value))
+
+    def _credit_savings_interest(self) -> float:
+        """储蓄利息：按年化、按天算，停机漏掉的天数一起补。
+
+        只进储蓄，不动余额；同一天只结算一次。
+        """
+        savings = float(self._ledger.savings or 0)
+        rate = self.savings_rate()
+        if savings <= 0 or rate <= 0:
+            self._state["last_interest_date"] = _today()
+            return 0.0
+        today = date.today()
+        last_raw = self._state.get("last_interest_date")
+        try:
+            last = (date.fromisoformat(str(last_raw)) if last_raw
+                    else date.fromordinal(today.toordinal() - 1))
+        except Exception:
+            last = date.fromordinal(today.toordinal() - 1)
+        days = (today - last).days
+        if days <= 0:
+            return 0.0
+        days = min(days, 366)
+        interest = round(savings * rate / 100.0 / 365.0 * days, 2)
+        self._state["last_interest_date"] = today.isoformat()
+        if interest < 0.01:
+            self._save()
+            return 0.0
+        result = self._ledger.credit_interest(interest)
+        if not result.get("ok"):
+            return 0.0
+        self._log({
+            "kind": "interest", "amount": interest,
+            "reason": "储蓄利息（年化 %.2f%%，%d 天）" % (rate, days),
+            "savings": result.get("savings"),
+            "balance": round(self._ledger.balance, 2),
+        })
+        self._save()
+        logger.info("[amo_fin] 储蓄利息 %.2f（年化 %.2f%%，%d 天）" % (interest, rate, days))
+        return interest
+
+    def auto_repay_enabled(self) -> bool:
+        return self._bool("auto_repay", True)
+
+    def _auto_repay(self) -> float:
+        """她有钱了会主动还他：留够固定支出和一点生活费，剩下的拿一半还。
+
+        借款没有利息；一天最多还一次，还清后 owed 归零。
+        """
+        if not self.auto_repay_enabled():
+            return 0.0
+        owed = float(self._ledger.owed_to_user or 0)
+        if owed <= 0:
+            return 0.0
+        today = _today()
+        if self._state.get("last_repay_date") == today:
+            return 0.0
+        try:
+            fixed_total = sum(item["amount"] for item in
+                              monthly_fixed(self._ledger, self._prices(), self._city()))
+        except Exception:
+            fixed_total = 0.0
+        reserve = max(self.REPAY_KEEP_MIN, fixed_total) + self.REPAY_RESERVE_EXTRA
+        spare = round(float(self._ledger.balance) - reserve, 2)
+        if spare < self.REPAY_MIN * 2:
+            return 0.0
+        amount = round(min(owed, spare * 0.5, self.REPAY_DAY_MAX), 2)
+        if amount < self.REPAY_MIN:
+            return 0.0
+        result = self.repay(amount)
+        if not result.get("ok"):
+            return 0.0
+        self._state["last_repay_date"] = today
+        self._save()
+        logger.info("[amo_fin] 她还了他 %.2f，还欠 %.2f" %
+                    (float(result.get("paid") or 0), float(result.get("remaining") or 0)))
+        return float(result.get("paid") or 0)
 
     # ------------------------------------------------------------------
     # 和终端联动
@@ -1573,6 +1767,9 @@ class AmoFinancePlugin(Star):
             "invest": snap.get("invest") or self.invest_summary(),
             "borrow": snap.get("borrow") or self.borrow_info(),
             "gift": snap.get("gift") or {},
+            "repay": snap.get("repay") or {},
+            "savings_rate": self.savings_rate(),
+            "auto_repay": self.auto_repay_enabled(),
             "uptime": int(_now() - self._started_at),
         }})
 

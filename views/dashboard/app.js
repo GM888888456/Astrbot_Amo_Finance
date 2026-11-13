@@ -55,6 +55,7 @@ async function loadStatus() {
   $("balance").textContent = money(d.balance);
   $("savings").textContent = money(d.savings);
   $("owed").textContent = d.owed_to_user ? money(d.owed_to_user) : "无";
+  $("savingsRate").textContent = d.savings_rate ? ("年化 " + d.savings_rate + "%") : "不计息";
   $("spent").textContent = money(d.month_spent);
   $("earned").textContent = money(d.month_income);
   $("city").textContent = (d.city || "未配置") + " · " + d.city_level;
@@ -115,7 +116,7 @@ async function loadHistory() {
   const list = $("history");
   if (!items.length) { list.innerHTML = '<li class="empty">还没有账</li>'; return; }
   list.innerHTML = items.slice().reverse().slice(0, 40).map((it) => {
-    const neg = ["expense", "fixed", "repay"].includes(it.kind);
+    const neg = ["expense", "fixed", "repay", "stock_buy"].includes(it.kind);
     const cls = it.kind === "expense_failed" ? "bad" : (neg ? "" : "ok");
     const sign = neg ? "-" : "+";
     return '<li><span class="t">' + (it.time || "") + '</span><span class="p">' +

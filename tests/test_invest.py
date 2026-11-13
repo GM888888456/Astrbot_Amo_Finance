@@ -94,6 +94,21 @@ class InvestTests(unittest.TestCase):
         self.assertFalse(blocked["ok"], blocked)
         self.assertIn("太多", blocked["reason"])
 
+    def test_buy_goes_into_flow_not_month_spent(self):
+        """买股是资产转换：进流水，但不进「本月花」。"""
+        p = build()
+        p.invest_buy("600519", qty=100)
+        self.assertEqual(p._ledger.month_spent, 0.0)
+        self.assertIn("stock_buy", [h.get("kind") for h in p._history])
+        self.assertIn("买入", p._history[-1].get("reason", ""))
+
+    def test_sell_goes_into_flow_not_month_income(self):
+        p = build()
+        p.invest_buy("600519", qty=100)
+        p.invest_sell("600519", all_out=True)
+        self.assertEqual(p._ledger.month_income, 0.0)
+        self.assertIn("stock_sell", [h.get("kind") for h in p._history])
+
     def test_sell_returns_cash_and_clears(self):
         p = build()
         p.invest_buy("600519", qty=100)

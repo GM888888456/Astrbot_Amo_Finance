@@ -245,6 +245,14 @@ class Ledger:
         self.month_spent = 0.0
         return pay
 
+    def credit_interest(self, amount: float) -> dict[str, Any]:
+        """储蓄利息入账：只进储蓄，不动余额，也不算当月收入。"""
+        value = round(max(0.0, float(amount)), 2)
+        if value <= 0:
+            return {"ok": False, "reason": "利息太小"}
+        self.savings = round(self.savings + value, 2)
+        return {"ok": True, "amount": value, "savings": round(self.savings, 2)}
+
     def repay_user(self, amount: float) -> dict[str, Any]:
         """还用户的钱。还不起就还一部分。"""
         value = round(min(abs(float(amount)), self.owed_to_user, self.balance), 2)

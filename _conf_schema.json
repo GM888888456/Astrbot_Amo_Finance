@@ -136,5 +136,17 @@
     "description": "最多同时持有几只",
     "default": 6,
     "hint": "激进模式 6 只，普通模式 3 只。满了以后要先卖才能买新的。"
+  },
+  "savings_rate": {
+    "type": "float",
+    "description": "储蓄年化利率（%）",
+    "default": 1.5,
+    "hint": "只给储蓄计息，按天算、同一天不重复。借款没有利息（情侣之间不收），0 = 不计息。"
+  },
+  "auto_repay": {
+    "type": "bool",
+    "description": "她有钱了自动还他",
+    "default": true,
+    "hint": "每天最多还一次：先留够固定支出和一点生活费，剩下的拿一半还；还清为止。转账给她 = 还款，不是消费。"
   }
 }
