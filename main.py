@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.5.0"
+PLUGIN_VERSION = "2.5.1"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1864,6 +1864,10 @@ class AmoFinancePlugin(Star):
                 return value
         return None
 
+    async def _report_to_companion_async(self) -> None:
+        """异步路径专用：snapshot 里可能抓汇率/行情，必须丢线程池。"""
+        await asyncio.to_thread(self._report_to_companion)
+
     def _report_to_companion(self) -> None:
         """把最新账本推给终端的状态里，让她说话时心里有数。"""
         companion = self._companion()
@@ -1932,7 +1936,7 @@ class AmoFinancePlugin(Star):
         self._log({"kind": "adjust", "amount": delta, "reason": "管理员调整",
                    "balance": self._ledger.balance})
         self._save()
-        self._report_to_companion()
+        await self._report_to_companion_async()
         yield event.plain_result("余额已设为 %.2f" % self._ledger.balance)
 
     # ------------------------------------------------------------------
@@ -2438,7 +2442,7 @@ class AmoFinancePlugin(Star):
         except Exception as exc:
             logger.debug("[amo_fin] 房车重新规划失败: %s" % exc)
         self._save()
-        self._report_to_companion()
+        await self._report_to_companion_async()
         snap = await asyncio.to_thread(self.snapshot)
         return self._json({"code": 0, "data": snap})
 
@@ -2455,7 +2459,7 @@ class AmoFinancePlugin(Star):
             from_savings=bool(data.get("from_savings")),
             request_id=str(data.get("request_id") or ""),
         )
-        self._report_to_companion()
+        await self._report_to_companion_async()
         return self._json({"code": 0, "data": result})
 
     async def api_borrow(self):
@@ -2470,7 +2474,7 @@ class AmoFinancePlugin(Star):
         if not result.get("ok"):
             return self._json({"code": 1, "message": result.get("reason") or "借不了",
                                "data": result})
-        self._report_to_companion()
+        await self._report_to_companion_async()
         return self._json({"code": 0, "data": result})
 
     async def api_income(self):
@@ -2481,7 +2485,7 @@ class AmoFinancePlugin(Star):
             return self._fail("金额格式不对")
         result = self.income(amount, reason=str(data.get("reason") or ""),
                              source=str(data.get("source") or ""))
-        self._report_to_companion()
+        await self._report_to_companion_async()
         return self._json({"code": 0, "data": result})
 
     async def terminate(self) -> None:

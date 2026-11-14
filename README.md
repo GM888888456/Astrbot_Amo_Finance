@@ -2,6 +2,12 @@
 
 给「我想永远陪着你-终端」做账本：钱从哪来、花到哪去、够不够花。
 
+## 2.5.1（并发修复：异步面板不再阻塞）
+
+- `api_assets` / `api_charge` / `api_borrow` / `api_income` 与 `/setmoney` 的 `_report_to_companion` 全部改走 `asyncio.to_thread`；`snapshot` 里的汇率/行情抓取不再阻塞事件循环。
+- `market.py` 的 `QuoteBoard` 与 `_fx()` 的同步 `urlopen` 只在工作线程内调用，异步路径不再直接触发。
+- 138 条测试通过。
+
 ## 2.5.0（投资只提醒、不替她买卖；房车可以卖也可以买）
 
 - 用户定的口径：**只提醒，不强制**。`invest_auto_trade` 默认从 True 改成 **False**，不再每天自动建仓/调仓；她想买想卖自己调工具。
