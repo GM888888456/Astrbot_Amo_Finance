@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.4.2"
+PLUGIN_VERSION = "2.5.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -1239,6 +1239,79 @@ class AmoFinancePlugin(Star):
                             (code, owed, "储蓄" if saved else "余额"))
             self._save()
 
+    # ---------- 房 / 车：可以卖，也可以再买 ----------
+
+    def asset_quote(self) -> dict[str, Any]:
+        """房/车现在大概值多少：房价按当地租金 20 年估，车按落地价。"""
+        try:
+            profile = _ledger_mod.city_profile(self._city())
+            rent_base = float(profile.get("rent") or 2000.0)
+        except Exception:
+            rent_base = 2000.0
+        return {
+            "house": round(rent_base * 260.0, 2),
+            "car": float(getattr(_ledger_mod, "CAR_PRICE", 128000.0)),
+            "own_house": bool(self._ledger.own_house),
+            "own_car": bool(self._ledger.own_car),
+        }
+
+    def sell_asset(self, kind: str = "house") -> dict[str, Any]:
+        """卖房/卖车：钱进卡里，房贷/车贷月供清掉（算作用卖房款结清）。"""
+        which = "car" if any(word in str(kind) for word in ("车", "car")) else "house"
+        quote = self.asset_quote()
+        if which == "house":
+            if not self._ledger.own_house:
+                return {"ok": False, "reason": "没有房子可卖", "asset": which}
+            price = float(quote["house"])
+            self._ledger.own_house = False
+            self._ledger.mortgage = 0.0
+        else:
+            if not self._ledger.own_car:
+                return {"ok": False, "reason": "没有车可卖", "asset": which}
+            price = round(float(quote["car"]) * 0.7, 2)  # 车落地打七折
+            self._ledger.own_car = False
+            self._ledger.car_loan = 0.0
+        self._ledger.balance = round(float(self._ledger.balance) + price, 2)
+        self._log({"kind": "sell_asset", "amount": price,
+                   "reason": "卖掉%s" % ("房子" if which == "house" else "车"),
+                   "balance": self._ledger.balance})
+        self._save()
+        logger.info("[amo_fin] 卖掉%s，到账 %.2f" % ("房子" if which == "house" else "车", price))
+        return {"ok": True, "asset": which, "price": price,
+                "balance": round(float(self._ledger.balance), 2)}
+
+    def buy_asset(self, kind: str = "house", full: bool = False) -> dict[str, Any]:
+        """买房/买车：全款或三成首付，剩下的走贷款月供。"""
+        which = "car" if any(word in str(kind) for word in ("车", "car")) else "house"
+        quote = self.asset_quote()
+        if which == "house" and self._ledger.own_house:
+            return {"ok": False, "reason": "已经有房子了", "asset": which}
+        if which == "car" and self._ledger.own_car:
+            return {"ok": False, "reason": "已经有车了", "asset": which}
+        price = float(quote["house"] if which == "house" else quote["car"])
+        need = price if full else round(price * 0.3, 2)
+        if float(self._ledger.balance) < need:
+            return {"ok": False, "reason": "钱不够", "asset": which,
+                    "need": round(need, 2), "balance": round(float(self._ledger.balance), 2)}
+        self._ledger.balance = round(float(self._ledger.balance) - need, 2)
+        if which == "house":
+            self._ledger.own_house = True
+            self._ledger.mortgage = 0.0 if full else round(_ledger_mod.monthly_loan(price * 0.7), 2)
+            self._ledger.house_rent = 0.0
+        else:
+            self._ledger.own_car = True
+            self._ledger.car_loan = 0.0 if full else round(_ledger_mod.monthly_loan(price * 0.7), 2)
+        self._log({"kind": "buy_asset", "amount": need,
+                   "reason": "%s%s" % ("全款买" if full else "首付买",
+                                       "房" if which == "house" else "车"),
+                   "balance": self._ledger.balance})
+        self._save()
+        logger.info("[amo_fin] %s%s，付了 %.2f" % ("全款买" if full else "首付买",
+                                                 "房" if which == "house" else "车", need))
+        return {"ok": True, "asset": which, "paid": round(need, 2), "price": price,
+                "balance": round(float(self._ledger.balance), 2),
+                "monthly": round(float(self._ledger.mortgage or self._ledger.car_loan), 2)}
+
     def invest_buy(self, symbol: str, qty: int = 0, budget: float = 0.0) -> dict[str, Any]:
         """买入。先看行情、再看钱、再落账——行情拿不到就明确失败。"""
         code = market_mod.normalize(symbol)
@@ -1533,7 +1606,8 @@ class AmoFinancePlugin(Star):
 
         if self._state.get("invest_auto_date") == today:
             return
-        if not self._bool("invest_auto_trade", True):
+        # 用户定的口径：投资只提醒、不替她动手（想做她自己调 amo_invest）
+        if not self._bool("invest_auto_trade", False):
             return
         self._state["invest_auto_date"] = today
         self._save()
