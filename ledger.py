@@ -210,7 +210,7 @@ class Ledger:
         if value <= 0:
             return {"ok": False, "reason": "金额必须大于 0"}
 
-        if kind in ("income", "transfer_in", "refund"):
+        if kind in ("income", "transfer_in", "refund", "gift_in"):
             if kind == "transfer_in":
                 self.owed_to_user = round(self.owed_to_user + value, 2)
             self.balance = round(self.balance + value, 2)

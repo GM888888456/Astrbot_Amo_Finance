@@ -56,17 +56,14 @@ class BorrowTests(unittest.TestCase):
         self.assertTrue(p._backfill_history_reasons())
         self.assertIn("红包", p._history[0]["reason"])
 
-    def test_red_packet_single_limit(self):
+    def test_red_packet_is_gift_and_limit_1000(self):
         p = build(balance=0)
-        self.assertFalse(p.borrow(300, "red")["ok"], "单个红包最多 200")
-        self.assertTrue(p.borrow(200, "red")["ok"])
-
-    def test_red_packet_total_limit(self):
-        p = build(balance=0, state={"borrow_red_total": 9900.0})
-        result = p.borrow(200, "red")
-        self.assertFalse(result["ok"])
-        self.assertIn("上限", result["reason"])
-        self.assertAlmostEqual(p.borrow_info()["red_left"], 100.0)
+        self.assertFalse(p.borrow(1001, "red")["ok"], "单个红包最多 1000")
+        result = p.borrow(1000, "red")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result.get("gift"))
+        self.assertAlmostEqual(p._ledger.owed_to_user, 0.0, msg="红包不用还")
+        self.assertAlmostEqual(p._ledger.balance, 1000.0)
 
     def test_transfer_daily_limit(self):
         p = build(balance=0)

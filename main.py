@@ -71,7 +71,7 @@ except ImportError:  # 直接按文件加载时
     import ledger as _ledger_mod  # type: ignore
 
 PLUGIN_NAME = "Astrbot_Amo_Finance"
-PLUGIN_VERSION = "2.5.1"
+PLUGIN_VERSION = "2.6.0"
 DISPLAY_NAME = "我想永远陪着你-金融"
 
 try:  # 版本号以 metadata.yaml 为准
@@ -794,7 +794,7 @@ class AmoFinancePlugin(Star):
 
     #: 借钱的两条通道：转账按天封顶，红包单个封顶、累计封顶
     BORROW_TRANSFER_DAILY = 10000.0
-    BORROW_RED_MAX = 200.0
+    BORROW_RED_MAX = 1000.0
     BORROW_RED_TOTAL = 10000.0
 
     def _borrow_day(self) -> dict[str, Any]:
@@ -804,6 +804,33 @@ class AmoFinancePlugin(Star):
             row = {"date": today, "transfer": 0.0}
             self._state["borrow_day"] = row
         return row
+
+    def red_packet(self, amount: float, from_user: str = "") -> dict[str, Any]:
+        """他发的红包：礼物，不用还；单个上限 1000。"""
+        try:
+            value = round(float(amount or 0), 2)
+        except (TypeError, ValueError):
+            return {"ok": False, "reason": "金额不对"}
+        if value <= 0:
+            return {"ok": False, "reason": "金额不对"}
+        if value > self.BORROW_RED_MAX:
+            return {"ok": False, "reason": "单个红包最多 %.0f" % self.BORROW_RED_MAX}
+        result = self._ledger.apply(value, "gift_in", reason="红包")
+        if not result.get("ok"):
+            return result
+        self._log({
+            "kind": "gift_in", "channel": "red", "amount": value,
+            "from": from_user, "balance": result.get("balance"),
+            "reason": "红包：他给的（不用还）",
+        })
+        self._note_gift(value, "red")
+        self._save()
+        logger.info("[amo_fin] 收到红包 %.2f（礼物，不用还），余额 %.2f"
+                    % (value, self._ledger.balance))
+        return {"ok": True, "channel": "red", "amount": value, "gift": True,
+                "balance": round(self._ledger.balance, 2),
+                "owed": round(self._ledger.owed_to_user, 2),
+                "left": self.borrow_info()}
 
     def borrow_info(self) -> dict[str, Any]:
         """她还能借多少：转账按天，红包按次与累计。"""
@@ -860,37 +887,28 @@ class AmoFinancePlugin(Star):
             return {"ok": False, "reason": "金额不对"}
         channel = "red" if str(kind or "").lower() in ("red", "redpacket", "红包") else "transfer"
         if channel == "red":
-            if value > self.BORROW_RED_MAX:
-                return {"ok": False, "reason": "单个红包最多 %.0f" % self.BORROW_RED_MAX}
-            used = float(self._state.get("borrow_red_total") or 0)
-            if used + value > self.BORROW_RED_TOTAL:
-                return {"ok": False, "reason": "红包累计到上限了",
-                        "left": round(max(0.0, self.BORROW_RED_TOTAL - used), 2)}
-        else:
-            day = self._borrow_day()
-            used = float(day.get("transfer") or 0)
-            if used + value > self.BORROW_TRANSFER_DAILY:
-                return {"ok": False, "reason": "今天转账到上限了",
-                        "left": round(max(0.0, self.BORROW_TRANSFER_DAILY - used), 2)}
+            # 红包是礼物，不进欠款；老调用方也走同一条路
+            return self.red_packet(value, from_user)
+        day = self._borrow_day()
+        used = float(day.get("transfer") or 0)
+        if used + value > self.BORROW_TRANSFER_DAILY:
+            return {"ok": False, "reason": "今天转账到上限了",
+                    "left": round(max(0.0, self.BORROW_TRANSFER_DAILY - used), 2)}
         result = self._ledger.apply(value, "transfer_in", reason="借款")
         if not result.get("ok"):
             return result
-        if channel == "red":
-            self._state["borrow_red_total"] = round(
-                float(self._state.get("borrow_red_total") or 0) + value, 2)
-        else:
-            day = self._borrow_day()
-            day["transfer"] = round(float(day.get("transfer") or 0) + value, 2)
+        day = self._borrow_day()
+        day["transfer"] = round(float(day.get("transfer") or 0) + value, 2)
         self._log({
             "kind": "borrow", "channel": channel, "amount": value,
             "from": from_user, "owed": round(self._ledger.owed_to_user, 2),
             "balance": result.get("balance"),
-            "reason": "借款：%s" % ("红包" if channel == "red" else "转账"),
+            "reason": "借款：转账",
         })
         self._note_gift(value, channel)
         self._save()
-        logger.info("[amo_fin] 她借了 %.2f（%s），共欠 %.2f"
-                    % (value, "红包" if channel == "red" else "转账", self._ledger.owed_to_user))
+        logger.info("[amo_fin] 她借了 %.2f（转账），共欠 %.2f"
+                    % (value, self._ledger.owed_to_user))
         return {"ok": True, "channel": channel, "amount": value,
                 "balance": round(self._ledger.balance, 2),
                 "owed": round(self._ledger.owed_to_user, 2),

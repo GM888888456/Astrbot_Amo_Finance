@@ -1,5 +1,12 @@
 # 更新日志
 
+## 2.6.0（红包是礼物）
+
+- 新增 `red_packet()`：红包直接进余额、不进欠款，单个上限 1000；老调用方 `borrow(kind="red")` 也走礼物路径。
+- `ledger.apply` 新增 `gift_in` 类型：加余额、不计欠款、不计月收入。
+- 转账仍然是借款（每天最多一万），红包不再是借款。
+- 137 条测试通过。
+
 ## 2.5.1（并发修复：异步面板不再阻塞）
 
 - `api_assets` / `api_charge` / `api_borrow` / `api_income` 与 `/setmoney` 的 `_report_to_companion` 全部改走 `asyncio.to_thread`；`snapshot` 里的汇率/行情抓取不再阻塞事件循环。
